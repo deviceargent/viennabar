@@ -9,6 +9,7 @@ PoC de validación de las piezas críticas antes del MVP. Cada spike es un proye
 | S1 | AppBar | `SHAppBarMessage` ABM_NEW/SETPOS, auto-hide por borde, per-monitor DPI v2 | pendiente |
 | S2 | Shell namespace | `IShellItem`/`IShellFolder` enum, `SHChangeNotifyRegister`, expand-on-demand | ✓ |
 | S3 | OLE drag/drop | `IDropTarget` + helper, `CF_HDROP`/`CFSTR_SHELLIDLIST`, drag-out `SHCreateDataObject` | pendiente |
+| S3 | OLE drag/drop | `IDropTarget` + helper, `CF_HDROP`/`CFSTR_SHELLIDLIST`, drag-out `SHCreateDataObject` | ✓ (drag-in CF_HDROP + drag-out DoDragDrop; pendiente tu prueba visual) |
 | S4 | AppCatalog | `FOLDERID_AppsFolder` enum (Win32+MSIX), launch `IExecuteCommand` | ✓ con hallazgo |
 
 ### S2 — resultado (2026-09-01)
@@ -20,6 +21,22 @@ PoC de validación de las piezas críticas antes del MVP. Cada spike es un proye
   - Las notificaciones llegan via `SendMessage` → requieren la bomba de mensajes activa (crear archivos desde un timer dentro del loop, no antes).
   - `wParam` del mensaje = event id (SHCNE_*), no el PIDL.
   - SHCONTF/SHCNE no son generadas por CsWin32 → constantes propias.
+
+| S6 | Render | loop D2D/DComp por invalidación + skin base (acrylic celeste) | ✓ patrón (0 ms CPU idle, 18 MB) |
+
+### S3 — resultado (2026-09-01)
+
+- `RegisterDragDrop` + `IDropTarget` managed (CCW de .NET genera la vtable — **no hace falta vtable manual con CsWin32**). Firma generada: métodos `void` (no HRESULT) para `IDropTarget`; `IDropSource` sí retorna HRESULT.
+- Drag-in: `Drop()` recibe `IDataObject`, `GetData(CF_HDROP)` → `STGMEDIUM.u.hGlobal` (union `u`!) → `DragQueryFile` enumera paths.
+- Drag-out: `IShellFolder.GetUIObjectOf(riid=IDataObject)` sobre el PIDL child → `DoDragDrop` (CsWin32 toma `System.Runtime.InteropServices.ComTypes.IDataObject` — cast directo desde el wrapper funciona).
+- `IDropSource` propio: `QueryContinueDrag` retorna `DRAGDROP_S_DROP` (0x40100) al soltar el botón; `GiveFeedback` → `DRAGDROP_S_USEDEFAULTCURSORS` (0x40102). Constantes HRESULT DRAGDROP no generadas → definir a mano.
+- Validación manual pendiente: ventana "S3 OLE dnd" abierta por el usuario (drag archivos del Explorer → consola; clic izq → drag-out).
+
+### S6 — resultado (2026-09-01)
+
+- Patrón render-by-invalidation validado: **delta CPU en idle 5 s = 0 ms**, RAM 18.3 MB (todo el delta es JIT/arranque).
+- **Lección**: nunca mutar el título de la ventana dentro de `WM_PAINT` — dispara repaint del frame no-cliente en loop (~5 % CPU perpetua). El estado va a la consola o a overlays del render propio.
+- D2D/DComp completo (factory, DC render target, compositor) quedó registrado como tarea de F1 — el spike validó el patrón de mensajes, que era el riesgo real (el pipeline D2D es mecánico desde la doc).
 
 ### S4 — resultado y hallazgo (2026-09-01)
 
