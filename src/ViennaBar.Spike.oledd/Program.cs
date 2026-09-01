@@ -65,6 +65,7 @@ internal static unsafe class Program
         }
 
         _dropTarget = new DropTarget();
+        _dropTarget.Init(_hwnd);
         var hr = RegisterDragDrop(_hwnd, _dropTarget);
         _status = hr.Succeeded ? "DropTarget OK - arrastra archivos del Explorer" : $"RegisterDragDrop FAIL 0x{(int)hr:X}";
 
@@ -184,22 +185,78 @@ internal static unsafe class Program
 }
 
 // IDropTarget managed: el CCW de .NET genera la vtable COM automáticamente.
+// Delega el render del drag (imagen fantasma) en IDropTargetHelper del shell.
 internal sealed unsafe class DropTarget : global::Windows.Win32.System.Ole.IDropTarget
 {
+    private global::Windows.Win32.UI.Shell.IDropTargetHelper? _helper;
+    private HWND _hwnd;
+
+    public void Init(HWND hwnd)
+    {
+        _hwnd = hwnd;
+        // CLSID_DragDropHelper (constante generada por CsWin32) → IDropTargetHelper
+        Guid iidHelper = typeof(global::Windows.Win32.UI.Shell.IDropTargetHelper).GUID;
+        _ = CoCreateInstance(in CLSID_DragDropHelper, null, CLSCTX.CLSCTX_INPROC_SERVER, in iidHelper, out var obj);
+        _helper = obj as global::Windows.Win32.UI.Shell.IDropTargetHelper;
+        Console.WriteLine($"[DropTarget] helper={(_helper is not null ? "OK" : "FAIL")}");
+    }
+
     public void DragEnter(IDataObject pDataObj, MODIFIERKEYS_FLAGS grfKeyState, POINTL pt, DROPEFFECT* pdwEffect)
     {
         Console.WriteLine("[DropTarget] DragEnter");
+        DumpFormats(pDataObj);
+        var p = new System.Drawing.Point(pt.x, pt.y);
+        _helper?.DragEnter(_hwnd, pDataObj, &p, DROPEFFECT.DROPEFFECT_COPY);
         if (pdwEffect is not null) *pdwEffect = DROPEFFECT.DROPEFFECT_COPY;
+    }
+
+    // Diagnóstico: qué formatos trae el IDataObject del origen (Explorer)
+    private static unsafe void DumpFormats(IDataObject data)
+    {
+        string[] names =
+        {
+            "DragImageBits",      // bitmap del drag (SHDRAGIMAGE, la imagen fantasma)
+            "DragContext",        // contexto del drag (Win8+)
+            "DropDescription",    // texto "Copiar a %1"
+            "Preferred DropEffect",
+            "FileNameW",
+        };
+        foreach (var name in names)
+        {
+            uint cf = RegisterClipboardFormat(name);
+            if (cf == 0) continue;
+            var fmt = new FORMATETC
+            {
+                cfFormat = (ushort)cf,
+                dwAspect = (uint)DVASPECT.DVASPECT_CONTENT,
+                lindex = -1,
+                tymed = (uint)TYMED.TYMED_HGLOBAL,
+            };
+            bool present;
+            try
+            {
+                data.QueryGetData(&fmt);
+                present = true;
+            }
+            catch
+            {
+                present = false;
+            }
+            Console.WriteLine($"  [fmt] {name}: {(present ? "PRESENTE" : "-")}");
+        }
     }
 
     public void DragOver(MODIFIERKEYS_FLAGS grfKeyState, POINTL pt, DROPEFFECT* pdwEffect)
     {
+        var p = new System.Drawing.Point(pt.x, pt.y);
+        _helper?.DragOver(&p, DROPEFFECT.DROPEFFECT_COPY);
         if (pdwEffect is not null) *pdwEffect = DROPEFFECT.DROPEFFECT_COPY;
     }
 
     public void DragLeave()
     {
         Console.WriteLine("[DropTarget] DragLeave");
+        _helper?.DragLeave();
     }
 
     public void Drop(IDataObject pDataObj, MODIFIERKEYS_FLAGS grfKeyState, POINTL pt, DROPEFFECT* pdwEffect)
@@ -231,6 +288,8 @@ internal sealed unsafe class DropTarget : global::Windows.Win32.System.Ole.IDrop
                 }
             }
             ReleaseStgMedium(ref medium);
+            var pd = new System.Drawing.Point(pt.x, pt.y);
+            _helper?.Drop(pDataObj, &pd, DROPEFFECT.DROPEFFECT_COPY);
         }
         catch (Exception ex)
         {

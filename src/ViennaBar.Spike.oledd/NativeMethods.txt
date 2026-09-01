@@ -67,6 +67,16 @@ GetData
 VK_ESCAPE
 DestroyWindow
 SHGetDesktopFolder
+EnumFormatEtc
+GetClipboardFormatName
+QueryGetData
+IDropTargetHelper
+CoCreateInstance
+CLSID_DragDropHelper
+DragEnter
+DragLeave
+DragOver
+Drop
 IShellFolder
 ILFree
 SHCreateDataObject

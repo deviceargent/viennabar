@@ -30,7 +30,8 @@ PoC de validación de las piezas críticas antes del MVP. Cada spike es un proye
 - Drag-in: `Drop()` recibe `IDataObject`, `GetData(CF_HDROP)` → `STGMEDIUM.u.hGlobal` (union `u`!) → `DragQueryFile` enumera paths.
 - Drag-out: `IShellFolder.GetUIObjectOf(riid=IDataObject)` sobre el PIDL child → `DoDragDrop` (CsWin32 toma `System.Runtime.InteropServices.ComTypes.IDataObject` — cast directo desde el wrapper funciona).
 - `IDropSource` propio: `QueryContinueDrag` retorna `DRAGDROP_S_DROP` (0x40100) al soltar el botón; `GiveFeedback` → `DRAGDROP_S_USEDEFAULTCURSORS` (0x40102). Constantes HRESULT DRAGDROP no generadas → definir a mano.
-- Validación manual pendiente: ventana "S3 OLE dnd" abierta por el usuario (drag archivos del Explorer → consola; clic izq → drag-out).
+- Validación manual: drag-in OK (jpg/txt/mp3/mp4 con paths correctos). `IDropTargetHelper` (CLSID_DragDropHelper, constante CsWin32 — **GUID manual falló 2 veces: regla, siempre usar la constante generada**) instanciado OK. Drag-out validado a nivel API.
+- **Diagnóstico drag-image**: el IDataObject del Explorer trae `DragImageBits`/`DragContext`/`DropDescription`/`Preferred DropEffect`/`FileNameW` todos PRESENTES; el helper responde; pero en **sesión remota con GPU virtualizada** la drag-image window renderiza como placeholder blanco (limitación del entorno, no del código — mismo pipeline en bestshelf/WinForms se ve). Re-verificar visualmente en máquina física en F1.
 
 ### S6 — resultado (2026-09-01)
 
