@@ -7,9 +7,19 @@ PoC de validación de las piezas críticas antes del MVP. Cada spike es un proye
 | # | Área | Valida | Estado |
 |---|---|---|---|
 | S1 | AppBar | `SHAppBarMessage` ABM_NEW/SETPOS, auto-hide por borde, per-monitor DPI v2 | pendiente |
-| S2 | Shell namespace | `IShellItem`/`IShellFolder` enum, `SHChangeNotifyRegister`, expand-on-demand | pendiente |
+| S2 | Shell namespace | `IShellItem`/`IShellFolder` enum, `SHChangeNotifyRegister`, expand-on-demand | ✓ |
 | S3 | OLE drag/drop | `IDropTarget` + helper, `CF_HDROP`/`CFSTR_SHELLIDLIST`, drag-out `SHCreateDataObject` | pendiente |
 | S4 | AppCatalog | `FOLDERID_AppsFolder` enum (Win32+MSIX), launch `IExecuteCommand` | ✓ con hallazgo |
+
+### S2 — resultado (2026-09-01)
+
+- Enum namespace OK: desktop = 35 items, expand-on-demand de `C:\` = 23 items (bind → EnumObjects).
+- `SHChangeNotifyRegister` OK: registro con PIDL desktop (PIDL vacío de 2 bytes via CoTaskMemAlloc) + `fRecursive`, fuentes `InterruptLevel|ShellLevel|RecursiveInterrupt`, eventos CREATE/DELETE/UPDATEITEM/RENAMEITEM → 9 notificaciones recibidas ante create/delete en Desktop, con event ids correctos (0x2/0x4/0x2000).
+- **Lecciones**:
+  - El shell solo monitoriza (interrupt) carpetas vigiladas (Desktop, Recent, etc.). Cambios en `Temp` u otras carpetas **no disparan notificación** — el tree de ViennaBar debe hacer refresh propio al expandir nodos no monitorizados.
+  - Las notificaciones llegan via `SendMessage` → requieren la bomba de mensajes activa (crear archivos desde un timer dentro del loop, no antes).
+  - `wParam` del mensaje = event id (SHCNE_*), no el PIDL.
+  - SHCONTF/SHCNE no son generadas por CsWin32 → constantes propias.
 
 ### S4 — resultado y hallazgo (2026-09-01)
 
