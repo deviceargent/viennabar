@@ -11,6 +11,7 @@
 - `WNDPROC`: función estática cast `(WNDPROC)WndProc` (NO `[UnmanagedCallersOnly]`, no convertible a delegate).
 - Strings nativos: `fixed (char* s = "...")` → `PCWSTR`.
 - `LRESULT`: `return default;`, no `return 0;`.
+- **GUIDs COM: nunca escribirlos de memoria** — CsWin32 genera las constantes (`BHID_SFObject`, `CLSID_DragDropHelper`, …). Dos GUIDs manuales fallaron en F0 antes de adoptar esta regla.
 
 ## Estado
 - F0: S1 ✓ (AppBar auto-hide: 1.4 MB AOT, 10.1 MB RAM, 0% CPU idle). S2–S6 pendientes.
