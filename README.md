@@ -1,0 +1,41 @@
+# ViennaBar
+
+Barra lateral para Windows 11 (22H2+): explorador de archivos + dropzone + widgets + menú de inicio, como shell aditivo. Ligereza como requisito de diseño: un proceso residente, todo lazy.
+
+**Estado**: F0 (spike) — no compilable aún. Ver [docs/arquitectura.md](docs/arquitectura.md) y [docs/matriz-cobertura.md](docs/matriz-cobertura.md).
+
+## Decisiones fijadas
+
+| Decisión | Valor |
+|---|---|
+| Stack | C# .NET 8 NativeAOT + CsWin32 + Direct2D/DirectComposition |
+| Target | Windows 11 22H2+ (x64) |
+| Menú de inicio | Catálogo propio (AppsFolder + LNK + Windows Search) |
+| Modo shell completo (M3) | Sí, F4 opt-in con auto-reversión |
+| Skin default | "Vienna Celeste" (acrylic celeste, sheen Aero) |
+
+## Presupuesto de rendimiento (gates F0/F1)
+
+- Core idle: < 25 MB private bytes, 0 % CPU (event-driven)
+- Arranque frío: < 350 ms
+- Binario: < 10 MB, sin runtime que instalar (NativeAOT)
+- Stub de activación (verb/IFEO): < 50 ms
+
+## Estructura
+
+```
+src/ViennaBar/              core residente (appbar, UI D2D/DComp, tree, drop, drawer)
+src/ViennaBar.Launcher/     wrapper IFEO (solo modo M2)
+src/ViennaBar.WidgetHost/   host out-of-proc para widgets de terceros (F5)
+tests/                      gates de rendimiento + tests unitarios
+docs/                       arquitectura y matriz de cobertura
+```
+
+## Modos de integración (todos opt-in, reversibles)
+
+| Modo | Mecanismo | Fase |
+|---|---|---|
+| M0 | Coexistencia (default) | F1 |
+| M1 | Verbs HKCU sobre Directory/Drive/Folder (+ manejo DelegateExecute) | F3 |
+| M2 | IFEO Debugger sobre explorer.exe → Launcher; TaskbarAl | F3 |
+| M3 | Winlogon Shell (tray, wallpaper, alt-tab propios) | F4 |

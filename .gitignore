@@ -1,0 +1,15 @@
+# Build artifacts
+bin/
+obj/
+artifacts/
+publish/
+
+# Rider / VS
+.vs/
+.idea/
+*.user
+*.suo
+
+# OS
+Thumbs.db
+desktop.ini
