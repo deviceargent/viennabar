@@ -154,6 +154,7 @@ internal sealed unsafe class Renderer : IDisposable
 
     public TextFormatHandle Text9Handle => new((nint)_text9);
     public TextFormatHandle Text11bHandle => new((nint)_text11b);
+    public TextFormatHandle TextBigHandle => new((nint)_text11b); // reloj: 11b bold
 
     public void Dispose()
     {

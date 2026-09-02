@@ -29,6 +29,7 @@ internal sealed unsafe class App : IDisposable
     private readonly ShellTree _tree;
     private DropEngine _drop = null!;
     private readonly Drawer _drawer;
+    private readonly Widgets _widgets = new();
     private readonly Renderer _renderer = new();
 
     private int ClientH => Math.Max(1, _clientH);
@@ -113,6 +114,8 @@ internal sealed unsafe class App : IDisposable
         _drop.Attach(_hwnd);
         _drawer.Attach(_hwnd);
         _drawer.InitText(_renderer);
+        // widgets: timer solo con la barra visible (Start/Stop en SetPos)
+        _widgets.Start(_hwnd);
 
         while (GetMessage(out var msg, default, 0, 0))
         {
@@ -161,6 +164,10 @@ internal sealed unsafe class App : IDisposable
             abd.rc.right - abd.rc.left, abd.rc.bottom - abd.rc.top,
             SET_WINDOW_POS_FLAGS.SWP_NOZORDER | SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE);
         _hidden = hidden;
+
+        // timer de widgets: activo SOLO revelado (idle oculto = 0 CPU absoluto)
+        if (hidden) _ = KillTimer(_hwnd, 3);
+        else _ = SetTimer(_hwnd, 3, 1000, null);
 
         // el RT de D2D sigue el tamaño de la ventana
         _renderer.Resize(_hwnd, (uint)(abd.rc.right - abd.rc.left), (uint)(abd.rc.bottom - abd.rc.top));
@@ -252,6 +259,10 @@ internal sealed unsafe class App : IDisposable
                         _ = KillTimer(hwnd, TimerHide);
                         if (!_hidden) SetPos(SliverPx, hidden: true);
                         break;
+
+                    case 3: // widgets tick (solo con barra visible)
+                        _widgets.OnTimer(hwnd, 3);
+                        break;
                 }
                 return default;
 
@@ -308,6 +319,7 @@ internal sealed unsafe class App : IDisposable
             ctx.Line(Skin.Divider, 0, WidgetsH + TreeH, FullWidthPx, WidgetsH + TreeH);
 
             ctx.Text("widgets", _renderer.Text9Handle, Skin.Muted, 8, 6, 260, 18);
+            _widgets.Render(ctx, 0, 0, FullWidthPx, WidgetsH);
 
             _tree.Render(ctx, 0, WidgetsH, FullWidthPx, TreeH);
             _drawer.SetDrawerArea(DrawerH);
