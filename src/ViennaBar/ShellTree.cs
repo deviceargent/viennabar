@@ -25,10 +25,11 @@ internal sealed unsafe class ShellTree : IDisposable
 
     public sealed class TreeNode
     {
-        public required string Name;        // display
-        public required string ParsingName; // para re-bind
+        public required string Name;
+        public required string ParsingName;
         public bool IsFolder;
         public bool Expanded;
+        public byte[]? Pidl;              // child PIDL snapshot (para IContextMenu)
         public readonly List<TreeNode> Children = new();
     }
 
@@ -70,6 +71,129 @@ internal sealed unsafe class ShellTree : IDisposable
 
     private static string? GetKnownPath(string guidStr) =>
         SHGetKnownFolderPath(new Guid(guidStr), 0, default, out var p).Succeeded ? p.ToString() : null;
+
+    private static byte[] SnapshotPidl(ITEMIDLIST* pidl)
+    {
+        uint size = ILGetSize(pidl);
+        var buf = new byte[size];
+        Marshal.Copy((nint)pidl, buf, 0, (int)size);
+        return buf;
+    }
+
+    // click derecho en un nodo → menú contextual del shell + handlers de
+    // terceros (7-Zip, WinRAR...) via TrackPopupMenu nativo.
+    // Requiere el IShellFolder PADRE del ítem: se re-enumera el padre del
+    // nodo y se matchea por PIDL (F3: cache de padres por nodo).
+    public static unsafe byte[]? TryGetPidlAt(TreeNode node, int y, int width, int height) => node.Pidl;
+
+    public void OnRightClick(int x, int y, int width, int height)
+    {
+        var (node, _) = HitTest(y, width, height);
+        if (node?.Pidl is null || node.Pidl.Length < 4) return;
+        ShowContextMenu(node, x, y);
+    }
+
+    private void ShowContextMenu(TreeNode node, int x, int y)
+    {
+        // folder padre: el nodo raíz que lo contiene (o desktop para raíces)
+        TreeNode parent = FindParentOf(Roots, node) ?? node;
+
+        // bind al folder del padre (o desktop si es raíz)
+        IShellFolder folder = _desktop;
+        if (!ReferenceEquals(parent, node) && !string.IsNullOrEmpty(parent.ParsingName))
+        {
+            BindFolder(parent.ParsingName, out var sf);
+            if (sf is not null) folder = sf;
+        }
+
+        // child PIDL restaurado
+        var child = (ITEMIDLIST*)Marshal.AllocCoTaskMem(node.Pidl!.Length);
+        Marshal.Copy(node.Pidl, 0, (nint)child, node.Pidl.Length);
+        try
+        {
+            Guid iidMenu = typeof(IContextMenu).GUID;
+            folder.GetUIObjectOf(default, 1, &child, &iidMenu, null, out var menuObj);
+            if (menuObj is not IContextMenu menu) return;
+
+            var hmenu = CreatePopupMenu();
+            try
+            {
+                menu.QueryContextMenu(hmenu, 0, 1, 0x7FFF, 0);
+                GetCursorPos(out var ptScreen);
+
+                // TrackPopupMenu nativo: renderiza el menú completo (incluye
+                // submenús de 7-Zip/WinRAR/Tortoise) — F3 lo skinnea con D2D
+                int cmd = TrackPopupMenu(hmenu,
+                    TRACK_POPUP_MENU_FLAGS.TPM_RETURNCMD | TRACK_POPUP_MENU_FLAGS.TPM_RIGHTBUTTON,
+                    ptScreen.X, ptScreen.Y, 0, _hwnd, null);
+                if (cmd > 0)
+                {
+                    // cmd es offset: idCmd=1 → offset 0 (MAKEINTRESOURCEA)
+                    var ici = new CMINVOKECOMMANDINFO
+                    {
+                        cbSize = (uint)Marshal.SizeOf<CMINVOKECOMMANDINFO>(),
+                        lpVerb = (PCSTR)(byte*)(nint)(cmd - 1),
+                        nShow = 5,
+                    };
+                    menu.InvokeCommand(&ici);
+                }
+            }
+            finally { _ = DestroyMenu(hmenu); }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ctx] error: {ex.Message}");
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem((nint)child);
+        }
+    }
+
+    private static TreeNode? FindParentOf(List<TreeNode> list, TreeNode target)
+    {
+        foreach (var n in list)
+        {
+            foreach (var c in n.Children)
+                if (ReferenceEquals(c, target)) return n;
+            var deeper = FindParentOf(n.Children, target);
+            if (deeper is not null) return deeper;
+        }
+        return null;
+    }
+
+    private void BindFolder(string parsingName, out IShellFolder? sf)
+    {
+        sf = null;
+        if (_desktop is null) return;
+        if (parsingName.StartsWith("::{"))
+        {
+            ITEMIDLIST* pidl = null;
+            uint attr = 0;
+            fixed (char* p = parsingName)
+            {
+                try { _desktop.ParseDisplayName(default, default, p, null, &pidl, ref attr); }
+                catch { pidl = null; }
+            }
+            if (pidl is null) return;
+            Guid iid = typeof(IShellFolder).GUID;
+            _desktop.BindToObject(pidl, default, &iid, out var obj);
+            ILFree(pidl);
+            sf = obj as IShellFolder;
+        }
+        else
+        {
+            Guid iidItem = typeof(IShellItem).GUID;
+            if (SHCreateItemFromParsingName(parsingName, default, in iidItem, out var itemObj).Succeeded
+                && itemObj is IShellItem item)
+            {
+                Guid bhid = BHID_SFObject;
+                Guid iidFolder = typeof(IShellFolder).GUID;
+                item.BindToHandler(default, &bhid, &iidFolder, out var sfObj);
+                sf = sfObj as IShellFolder;
+            }
+        }
+    }
 
     // click en el área del tree: localiza nodo por Y → toggle expand
     public void OnClick(int x, int y, int width, int height)
@@ -154,6 +278,7 @@ internal sealed unsafe class ShellTree : IDisposable
                         Name = name,
                         ParsingName = parsing,
                         IsFolder = isFolder,
+                        Pidl = SnapshotPidl(child),
                     });
                 }
                 finally { ILFree(child); }

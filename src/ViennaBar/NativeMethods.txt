@@ -157,3 +157,9 @@ GetSystemTimes
 GlobalMemoryStatusEx
 MEMORYSTATUSEX
 SYSTEMTIME
+TrackPopupMenu
+TPM_RETURNCMD
+GetCursorPos
+ClientToScreen
+WM_RBUTTONUP
+WM_RBUTTONDOWN

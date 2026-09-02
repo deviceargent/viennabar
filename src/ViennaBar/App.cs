@@ -291,6 +291,15 @@ internal sealed unsafe class App : IDisposable
                 OnKey(WM_KEYDOWN, wparam);
                 return default;
 
+            case WM_RBUTTONUP:
+            {
+                int rx = GET_X_LPARAM(lparam);
+                int ry = GET_Y_LPARAM(lparam);
+                if (ry >= WidgetsH && ry < WidgetsH + TreeH)
+                    _tree.OnRightClick(rx, ry - WidgetsH, FullWidthPx, TreeH);
+                return default;
+            }
+
             case WM_LBUTTONDBLCLK:
                 // kill-switch dev: SOLO con archivo centinela %TEMP%\viennabar-kill
                 // (nunca cierra accidentalmente; debug: touch + doble clic en widgets)
