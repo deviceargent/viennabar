@@ -20,5 +20,7 @@
   - El E_INVALIDARG de COM llega como `ArgumentException` (no `COMException`) — catch genérico si se quiere log claro.
 
 ## Estado
-- F0: S1 ✓ (AppBar auto-hide: 1.4 MB AOT, 10.1 MB RAM, 0% CPU idle). S2–S6 pendientes.
-- Docs de arquitectura: `docs/arquitectura.md` (fuente de verdad), `docs/matriz-cobertura.md`, `docs/f0-spike.md`.
+- **F2 en progreso (2026-09-02, noche)**: F2.1a D2D vtables crudas (proyecto `ViennaBar.Gfx`, `allowMarshaling=false` + `InternalsVisibleTo`) → **AOT 2.13 MB, 9.5 MB RAM, 0% CPU**. F2.2 widgets (reloj+CPU+RAM, timer solo visible). F2.3 menú contextual tree (TrackPopupMenu nativo — pendiente prueba visual con 7-Zip). F2.4 skin JSON hot-reload (`%APPDATA%\ViennaBar\skin.json`, FileSystemWatcher → PostMessage WM_APP+2 → ReloadBrushes en hilo UI) + botón Inicio orbe D2D.
+- **F2.1b PENDIENTE**: migrar shell COM (IShellFolder/IContextMenu/IDataObject del core) a vtables crudas + CCW manual para `IDropTarget` (dropzone) — es lo único entre nosotros y el AOT completo del exe. Hacer con sesión activa: requiere probar drop+launch en AOT.
+- Lecciones vtables CsWin32 (`allowMarshaling=false`): interfaces = structs con `lpVtbl`; el pattern es `IFace.Interface*` + `IFace*` raw para Release; `IComIID.IID_Guid` para los Guids; wrappers tipo extension no existen — llamar los métodos de `Interface` directo. **CsWin32 no escanea subdirectorios** para NativeMethods.txt extra: un assembly por config (por eso `ViennaBar.Gfx` es proyecto aparte). Los tipos generados son `internal` → `InternalsVisibleTo` para consumirlos desde el proyecto principal.
+- Docs de arquitectura: `docs/arquitectura.md` (fuente de verdad), `docs/matriz-cobertura.md`, `docs/f0-spike.md` (gates F0/F1 + bloqueo AOT resuelto en F2.1a).
