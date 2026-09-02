@@ -89,8 +89,10 @@ internal sealed unsafe class App : IDisposable
 
         fixed (char* wc = WndClass, title = "ViennaBar")
         {
+            // sin WS_EX_NOACTIVATE: el click activa la ventana y da foco de
+            // teclado (busqueda del drawer). El reveal por mouse no activa.
             _hwnd = CreateWindowEx(
-                WINDOW_EX_STYLE.WS_EX_TOOLWINDOW | WINDOW_EX_STYLE.WS_EX_TOPMOST | WINDOW_EX_STYLE.WS_EX_NOACTIVATE,
+                WINDOW_EX_STYLE.WS_EX_TOOLWINDOW | WINDOW_EX_STYLE.WS_EX_TOPMOST,
                 wc, title,
                 WINDOW_STYLE.WS_POPUP,
                 -FullWidthPx, 0, FullWidthPx, _clientH,
@@ -174,6 +176,7 @@ internal sealed unsafe class App : IDisposable
             if (y >= ClientH - 40 || !_drawerOpen)
             {
                 _drawerOpen = !_drawerOpen;
+                if (_drawerOpen) _drawer.FocusSearch();
                 Invalidate();
             }
             else
@@ -185,6 +188,15 @@ internal sealed unsafe class App : IDisposable
         {
             _tree.OnClick(x, y - WidgetsH, FullWidthPx, TreeH);
         }
+    }
+
+    // teclado → drawer (busqueda + navegacion). Llega porque al hacer click la
+    // ventana se activa y gana foco.
+    private void OnKey(uint msg, WPARAM wparam)
+    {
+        if (!_drawerOpen) return;
+        bool handled = _drawer.OnKey(msg, wparam);
+        if (handled) Invalidate();
     }
 
     private LRESULT WndProc(HWND hwnd, uint msg, WPARAM wparam, LPARAM lparam)
@@ -247,6 +259,14 @@ internal sealed unsafe class App : IDisposable
                 OnClick(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
                 return default;
 
+            case WM_CHAR:
+                OnKey(WM_CHAR, wparam);
+                return default;
+
+            case WM_KEYDOWN:
+                OnKey(WM_KEYDOWN, wparam);
+                return default;
+
             case WM_LBUTTONDBLCLK:
                 // kill-switch dev: SOLO con archivo centinela %TEMP%\viennabar-kill
                 // (nunca cierra accidentalmente; debug: touch + doble clic en widgets)
@@ -290,6 +310,7 @@ internal sealed unsafe class App : IDisposable
             ctx.Text("widgets", _renderer.Text9, Skin.Muted, 8, 6, 260, 18);
 
             _tree.Render(ctx, 0, WidgetsH, FullWidthPx, TreeH);
+            _drawer.SetDrawerArea(DrawerH);
             _drawer.Render(ctx, 0, WidgetsH + TreeH, FullWidthPx, DrawerH, _drawerOpen);
         });
     }

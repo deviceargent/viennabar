@@ -19,7 +19,9 @@ internal sealed class Drawer
     private readonly AppCatalog _catalog = new();
     private HWND _hwnd;
     private string _search = "";
-    private int _selIdx = -1;
+    private int _selIdx;                       // selección de teclado
+    private int _topRow;                       // scroll virtual (primera fila visible)
+    private float _drawerAreaH = 400f;          // F2: métrica real del layout
 
     public static IDWriteTextFormat F = null!;
     public static IDWriteTextFormat FBig = null!;
@@ -36,6 +38,74 @@ internal sealed class Drawer
         FBig = r.Text11b;
     }
 
+    public void SetDrawerArea(float h) => _drawerAreaH = h;
+
+    public void FocusSearch() { /* la ventana ya gana foco al activarse con click */ }
+
+    // teclado: WM_CHAR escribe, KEYDOWN navega/ejecuta. true → repintar.
+    public bool OnKey(uint msg, WPARAM wparam)
+    {
+        if (msg == WM_CHAR)
+        {
+            char c = (char)wparam.Value;
+            if (c == 27) return false;                       // ESC lo maneja KEYDOWN
+            if (c == '\r' || c == '\n')
+            {
+                LaunchSelected();
+                return true;
+            }
+            if (c == '\b')
+            {
+                if (_search.Length > 0) _search = _search[..^1];
+                _selIdx = 0; _topRow = 0; _resultsCache = null;
+                return true;
+            }
+            if (!char.IsControl(c) && _search.Length < 64)
+            {
+                _search += c;
+                _selIdx = 0; _topRow = 0; _resultsCache = null;
+                return true;
+            }
+            return false;
+        }
+
+        // WM_KEYDOWN
+        int vk = (int)wparam.Value;
+        var results = CurrentResults();
+        switch (vk)
+        {
+            case 0x1B: // VK_ESCAPE: limpia búsqueda
+                if (_search.Length > 0) { _search = ""; _selIdx = 0; _topRow = 0; _resultsCache = null; return true; }
+                return false;
+            case 0x26: // VK_UP
+                if (_selIdx > 0) { _selIdx--; ClampScroll(results.Count); return true; }
+                return false;
+            case 0x28: // VK_DOWN
+                if (_selIdx < results.Count - 1) { _selIdx++; ClampScroll(results.Count); return true; }
+                return false;
+            // VK_RETURN NO va acá: Enter produce WM_KEYDOWN + WM_CHAR('\r') —
+            // manejarlo en ambos = doble launch. Solo WM_CHAR lo lanza.
+        }
+        return false;
+    }
+
+    private void LaunchSelected()
+    {
+        var results = CurrentResults();
+        if (_selIdx >= 0 && _selIdx < results.Count)
+            Launch(results[_selIdx]);
+    }
+
+    private void ClampScroll(int total)
+    {
+        int visible = VisibleRows;
+        if (_topRow > _selIdx) _topRow = _selIdx;
+        if (_selIdx >= _topRow + visible) _topRow = _selIdx - visible + 1;
+        if (_topRow < 0) _topRow = 0;
+    }
+
+    private int VisibleRows => Math.Max(1, (int)((_drawerAreaH - SearchH - StartBtnH - 12) / RowH));
+
     // click dentro del área del drawer (coords locales al drawer).
     // Layout: search box [0..SearchH] | filas desde SearchH+2 (calza con Render).
     public void OnClick(int x, int y, int drawerH)
@@ -43,9 +113,10 @@ internal sealed class Drawer
         if (y < SearchH + 2) return; // search box: F2 (IME)
 
         var results = CurrentResults();
-        int idx = (int)((y - SearchH - 2) / RowH);
+        int idx = (int)((y - SearchH - 2) / RowH) + _topRow;
         if (idx >= 0 && idx < results.Count)
         {
+            _selIdx = idx;
             Launch(results[idx]);
         }
     }
@@ -169,19 +240,37 @@ internal sealed class Drawer
         if (!open) return;
 
         float dy = y + 4;
+        // search box con el texto real + caret
         ctx.FillRect(Skin.Search, 4, dy, w - 8, SearchH);
         ctx.Line(Skin.Divider, 4, dy, w - 4, dy);
         ctx.Line(Skin.Divider, 4, dy + SearchH, w - 4, dy + SearchH);
         ctx.Line(Skin.Divider, 4, dy, 4, dy + SearchH);
         ctx.Line(Skin.Divider, w - 4, dy, w - 4, dy + SearchH);
-        ctx.Text(string.IsNullOrEmpty(_search) ? "Buscar..." : _search, F, Skin.Muted, 10, dy + 4);
+        string caret = "|";
+        ctx.Text(string.IsNullOrEmpty(_search) ? "Buscar... " + caret : _search + caret, F, Skin.Text, 10, dy + 4);
         dy += SearchH + 2;
 
-        foreach (var app in CurrentResults())
+        // filas con scroll + selección
+        var results = CurrentResults();
+        int visible = VisibleRows;
+        int first = Math.Min(_topRow, Math.Max(0, results.Count - 1));
+        int last = Math.Min(first + visible, results.Count);
+        for (int i = first; i < last; i++)
         {
-            if (dy + RowH > y + h - StartBtnH - 8) break;
-            ctx.Text(app.Name, F, Skin.Text, 8, dy, w - 20);
-            dy += RowH;
+            float ry = dy + (i - first) * RowH;
+            if (i == _selIdx)
+                ctx.FillRect(Skin.Sel, 6, ry - 1, w - 12, RowH);
+            ctx.Text(results[i].Name, F, i == _selIdx ? Skin.Text : Skin.Text, 8, ry, w - 20);
+        }
+
+        // scrollbar minimal si hay overflow
+        if (results.Count > visible)
+        {
+            float trackH = visible * RowH;
+            float thumbH = Math.Max(12f, trackH * visible / results.Count);
+            float thumbY = dy + (trackH - thumbH) * first / Math.Max(1, results.Count - visible);
+            ctx.FillRect(Skin.Divider, w - 6, dy, 2, trackH);
+            ctx.FillRect(Skin.Text, w - 6, thumbY, 2, thumbH);
         }
     }
 
