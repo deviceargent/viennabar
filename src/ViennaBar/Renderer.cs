@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Windows.Win32;
 using Windows.Win32.Foundation;
@@ -8,51 +8,70 @@ using Windows.Win32.Graphics.DirectWrite;
 
 namespace ViennaBar;
 
-// UI engine (F2) — D2D + DWrite con vtables crudas (allowMarshaling=false,
-// AOT-safe). Render por invalidación; brushes/formats cacheados una vez.
+// UI engine (F2) â€” D2D + DWrite con vtables crudas (allowMarshaling=false,
+// AOT-safe). Render por invalidaciÃ³n; brushes/formats cacheados una vez.
 internal sealed unsafe class Renderer : IDisposable
 {
-    private ID2D1Factory.Interface* _factory;
-    private ID2D1HwndRenderTarget.Interface* _rt;
-    private IDWriteFactory.Interface* _dw;
-    private IDWriteTextFormat.Interface* _text9;
-    private IDWriteTextFormat.Interface* _text11b;
+    internal static void AppLog(string s)
+    {
+        try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "viennabar-app.log"), $"{DateTime.Now:HH:mm:ss.fff} {s}\n"); }
+        catch { }
+    }
 
-    private readonly Dictionary<string, nint> _brushes = new(); // name → ID2D1SolidColorBrush*
+    private ID2D1Factory* _factory;
+    private ID2D1HwndRenderTarget* _rt;
+    private IDWriteFactory* _dw;
+    private IDWriteTextFormat* _text9;
+    private IDWriteTextFormat* _text11b;
+
+    private readonly Dictionary<string, nint> _brushes = new(); // name â†’ ID2D1SolidColorBrush*
     private uint _w, _h;
 
     public void Init()
     {
-        // D2D factory: void** → struct vtable (AOT-safe, sin COM marshaling)
+        AppLog("gfx: init begin");
+        // D2D factory: void** â†’ struct vtable (AOT-safe, sin COM marshaling)
         Guid iidFactory = ID2D1Factory.IID_Guid;
         void* pFactory = null;
         var hr = ViennaBar.Gfx.GfxPInvoke.D2D1CreateFactory(D2D1_FACTORY_TYPE.D2D1_FACTORY_TYPE_SINGLE_THREADED,
             in iidFactory, null, out pFactory);
+        AppLog($"gfx: d2d factory hr=0x{(int)hr:X} ptr={(nint)pFactory != 0}");
         if (hr.Failed || pFactory is null) throw new InvalidOperationException($"D2D1CreateFactory hr=0x{(int)hr:X}");
-        _factory = (ID2D1Factory.Interface*)pFactory;
+        _factory = (ID2D1Factory*)pFactory;
 
         Guid iidDw = IDWriteFactory.IID_Guid;
         void* pDw = null;
         hr = ViennaBar.Gfx.GfxPInvoke.DWriteCreateFactory(DWRITE_FACTORY_TYPE.DWRITE_FACTORY_TYPE_SHARED, in iidDw, out pDw);
+        AppLog($"gfx: dwrite factory hr=0x{(int)hr:X} ptr={(nint)pDw != 0}");
         if (hr.Failed || pDw is null) throw new InvalidOperationException($"DWriteCreateFactory hr=0x{(int)hr:X}");
-        _dw = (IDWriteFactory.Interface*)pDw;
+        _dw = (IDWriteFactory*)pDw;
 
+        AppLog("gfx: formats begin");
         _text9 = CreateFormat(9f);
         _text11b = CreateFormat(11f, bold: true);
+        AppLog("gfx: init done");
     }
 
-    private IDWriteTextFormat.Interface* CreateFormat(float size, bool bold = false)
+    private IDWriteTextFormat* CreateFormat(float size, bool bold = false)
     {
         fixed (char* pFont = "Segoe UI", pLocale = "es-ES")
         {
             IDWriteTextFormat* fmtRaw = null;
-            var hr = _dw->CreateTextFormat(pFont, null,
-                bold ? DWRITE_FONT_WEIGHT.DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT.DWRITE_FONT_WEIGHT_NORMAL,
-                DWRITE_FONT_STYLE.DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_STRETCH.DWRITE_FONT_STRETCH_NORMAL,
-                size, pLocale, &fmtRaw);
-            if (hr.Failed || fmtRaw is null) throw new InvalidOperationException($"CreateTextFormat hr=0x{(int)hr:X}");
-            return (IDWriteTextFormat.Interface*)fmtRaw;
+            try
+            {
+                _dw->CreateTextFormat(pFont, null,
+                    bold ? DWRITE_FONT_WEIGHT.DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT.DWRITE_FONT_WEIGHT_NORMAL,
+                    DWRITE_FONT_STYLE.DWRITE_FONT_STYLE_NORMAL,
+                    DWRITE_FONT_STRETCH.DWRITE_FONT_STRETCH_NORMAL,
+                    size, pLocale, &fmtRaw);
+            }
+            catch (Exception ex)
+            {
+                AppLog($"CreateTextFormat FAIL: {ex.Message}");
+                throw;
+            }
+            if (fmtRaw is null) throw new InvalidOperationException("CreateTextFormat null");
+            return fmtRaw;
         }
     }
 
@@ -74,18 +93,18 @@ internal sealed unsafe class Renderer : IDisposable
         };
         var hwndProp = new D2D1_HWND_RENDER_TARGET_PROPERTIES
         {
-            hwnd = default,   // se setea abajo con el valor crudo (evita colisión HWND core/Gfx)
+            hwnd = default,   // se setea abajo con el valor crudo (evita colisiÃ³n HWND core/Gfx)
             pixelSize = new D2D_SIZE_U { width = width, height = height },
             presentOptions = D2D1_PRESENT_OPTIONS.D2D1_PRESENT_OPTIONS_NONE,
         };
-        *(nint*)&hwndProp.hwnd = hwndRaw;   // HWND es un nint de 8 bytes: asignación cruda
+        *(nint*)&hwndProp.hwnd = hwndRaw;   // HWND es un nint de 8 bytes: asignaciÃ³n cruda
 
         ID2D1HwndRenderTarget* rtRaw = null;
         _factory->CreateHwndRenderTarget(&prop, &hwndProp, &rtRaw);
         if (rtRaw is null) return;
 
         if (_rt is not null) _ = ((ID2D1HwndRenderTarget*)_rt)->Release();
-        _rt = (ID2D1HwndRenderTarget.Interface*)rtRaw;
+        _rt = (ID2D1HwndRenderTarget*)rtRaw;
         _w = width; _h = height;
 
         // recrear brushes (viven del RT)
@@ -127,12 +146,12 @@ internal sealed unsafe class Renderer : IDisposable
     internal ID2D1SolidColorBrush* BrushPtr(string name) =>
         _brushes.TryGetValue(name, out var p) ? (ID2D1SolidColorBrush*)p : null;
 
-    internal IDWriteTextFormat.Interface* Text9 => _text9;
-    internal IDWriteTextFormat.Interface* Text11b => _text11b;
+    internal IDWriteTextFormat* Text9 => _text9;
+    internal IDWriteTextFormat* Text11b => _text11b;
 
-    // ---- puentes vtable para RenderCtx (cast RT hwnd → base) ----
-    private static ID2D1RenderTarget.Interface* AsRt(ID2D1HwndRenderTarget.Interface* hwndRt) =>
-        (ID2D1RenderTarget.Interface*)hwndRt;   // la vtable base está primero: cast directo
+    // ---- puentes vtable para RenderCtx (cast RT hwnd â†’ base) ----
+    private static ID2D1RenderTarget* AsRt(ID2D1HwndRenderTarget* hwndRt) =>
+        (ID2D1RenderTarget*)hwndRt;   // la vtable base estÃ¡ primero: cast directo
 
     internal void _rt_Clear(D2D1_COLOR_F* c) => AsRt(_rt)->Clear(c);
 
@@ -192,7 +211,7 @@ internal sealed unsafe class Renderer : IDisposable
     }
 }
 
-// contexto de dibujo: aislamos los detalles vtable de los módulos
+// contexto de dibujo: aislamos los detalles vtable de los mÃ³dulos
 internal unsafe struct RenderCtx
 {
     private readonly Renderer _owner;
@@ -244,7 +263,7 @@ internal unsafe struct RenderCtx
         a = ((argb >> 24) & 0xFF) / 255f,
     };
 
-    // mapea argb → brush cacheado del skin ACTUAL (tokens mutan en hot-reload)
+    // mapea argb â†’ brush cacheado del skin ACTUAL (tokens mutan en hot-reload)
     private static string BrushName(int argb)
     {
         foreach (var (name, value) in Skin.Current.CacheBrushSpec)
@@ -253,7 +272,7 @@ internal unsafe struct RenderCtx
     }
 }
 
-// handle opaco de text format para los módulos (sin exponer vtables)
+// handle opaco de text format para los mÃ³dulos (sin exponer vtables)
 internal readonly struct TextFormatHandle(nint ptr)
 {
     public nint Ptr { get; } = ptr;

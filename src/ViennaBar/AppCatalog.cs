@@ -28,6 +28,11 @@ internal sealed unsafe class AppCatalog : IDisposable
     private Thread? _refreshThread;
 
     public IReadOnlyList<AppEntry> Apps => _apps;
+    private static void Log(string s)
+    {
+        try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "viennabar-app.log"), $"{DateTime.Now:HH:mm:ss} {s}\n"); }
+        catch { }
+    }
 
     public void Attach()
     {
@@ -47,6 +52,14 @@ internal sealed unsafe class AppCatalog : IDisposable
         }
 
         LoadCache();
+        Log($"cache loaded: {_apps.Count} apps");
+
+        try
+        {
+            Log($"shell debug: {Shell.DebugState()}");
+        }
+        catch (Exception ex) { Log($"debug FAIL: {ex.Message}"); }
+
         _refreshThread = new Thread(RefreshFromShell) { IsBackground = true };
         _refreshThread.Start();
     }
@@ -111,12 +124,12 @@ internal sealed unsafe class AppCatalog : IDisposable
             list.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
             _apps = list;
             SaveCache();
-            Console.WriteLine($"[catalog] refresh background: {list.Count} apps en {sw.ElapsedMilliseconds} ms");
+            Log($"refresh background: {list.Count} apps en {sw.ElapsedMilliseconds} ms");
             App.Instance?.Invalidate();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[catalog] refresh error: {ex.Message}");
+            Log($"refresh error: {ex.Message}");
         }
     }
 

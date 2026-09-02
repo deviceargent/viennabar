@@ -78,7 +78,9 @@ internal sealed unsafe class App : IDisposable
 
     private int MessageLoop()
     {
+        AppLog("ml: begin");
         var hinst = GetModuleHandle(default(PCWSTR));
+        AppLog("ml: hinst");
 
         fixed (char* wc = WndClass)
         {
@@ -111,22 +113,31 @@ internal sealed unsafe class App : IDisposable
                 default, default, hinst, null);
         }
         if (_hwnd.IsNull) return 1;
+        AppLog("ml: window created");
 
         // renderer ANTES del primer SetPos (que llama Resize)
         _renderer.Init();
+        AppLog("ml: renderer init");
         AppText.Init(_renderer);
 
         RegisterAppBar();
+        AppLog("ml: appbar");
         SetPos(SliverPx, hidden: true);
+        AppLog("ml: setpos");
         _ = ShowWindow(_hwnd, SHOW_WINDOW_CMD.SW_SHOWNOACTIVATE);
+        AppLog("ml: shown");
 
         _tree.Attach(_hwnd);
+        AppLog("tree attached");
         _drop = new DropEngine(_tree);
         _drop.Attach(_hwnd);
+        AppLog("drop attached");
         _drawer.Attach(_hwnd);
+        AppLog("drawer attached");
         _drawer.InitText(_renderer);
         // widgets: timer solo con la barra visible (Start/Stop en SetPos)
         _widgets.Start(_hwnd);
+        AppLog("widgets started");
 
         while (GetMessage(out var msg, default, 0, 0))
         {
@@ -188,6 +199,12 @@ internal sealed unsafe class App : IDisposable
     public void Invalidate() => _ = InvalidateRect(_hwnd, (RECT*)null, false);
 
     private bool Hidden => _hidden;
+
+    internal static void AppLog(string s)
+    {
+        try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "viennabar-app.log"), $"{DateTime.Now:HH:mm:ss.fff} {s}\n"); }
+        catch { }
+    }
 
     private void OnClick(int x, int y)
     {

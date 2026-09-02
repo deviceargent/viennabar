@@ -287,12 +287,16 @@ internal static unsafe class ShellNative
             catch { return 0; }
         }
 
-        if (TryCreateItemFromParsingName(parsingName, out var item).Failed) return 0;
         try
         {
-            return TryBindItemToFolder(item, out var sf) ? (nint)sf : 0;
+            if (TryCreateItemFromParsingName(parsingName, out var item).Failed) return 0;
+            try
+            {
+                return TryBindItemToFolder(item, out var sf) ? (nint)sf : 0;
+            }
+            finally { _ = item->Release(); }
         }
-        finally { _ = item->Release(); }
+        catch { return 0; }
     }
 
     public static List<ChildInfo> EnumChildren(nint folderHandle)
@@ -312,8 +316,32 @@ internal static unsafe class ShellNative
         if (folderHandle != 0) _ = ((IShellFolder*)folderHandle)->Release();
     }
 
-    public static nint OpenAppsFolder() => OpenFolderByParsingName(
-        "::{" + AppsFolderId.ToString("D") + "}");
+    public static nint OpenAppsFolder()
+    {
+        // ruta S4 validada: known folder item → BindToHandler(BHID_SFObject)
+        if (TryGetKnownFolderItem(in AppsFolderId, out var item).Failed) return 0;
+        try
+        {
+            return TryBindItemToFolder(item, out var sf) ? (nint)sf : 0;
+        }
+        finally { _ = item->Release(); }
+    }
+
+    public static string DebugState()
+    {
+        var sb = new System.Text.StringBuilder();
+        IShellFolder* desktop = null;
+        var hr = TryGetDesktopFolder(out desktop);
+        sb.Append($"desktop: hr=0x{(int)hr:X} ptr={(nint)desktop != 0}; ");
+        var apps = OpenAppsFolder();
+        sb.Append($"appsFolder: {(apps != 0 ? "OK" : "FAIL")}");
+        if (apps != 0)
+        {
+            sb.Append($"; appsChildren: {EnumChildren(apps).Count}");
+            ReleaseFolder(apps);
+        }
+        return sb.ToString();
+    }
 
     // =============== drop: parse CF_HDROP de un IDataObject* crudo ===============
     // Devuelve los paths del CF_HDROP (o lista vacÃ­a). El core lo llama desde
