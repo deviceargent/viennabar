@@ -181,7 +181,7 @@ internal sealed unsafe class App : IDisposable
         else _ = SetTimer(_hwnd, 3, 1000, null);
 
         // el RT de D2D sigue el tamaño de la ventana
-        _renderer.Resize(_hwnd, (uint)(abd.rc.right - abd.rc.left), (uint)(abd.rc.bottom - abd.rc.top));
+        _renderer.Resize((nint)_hwnd.Value, (uint)(abd.rc.right - abd.rc.left), (uint)(abd.rc.bottom - abd.rc.top));
         _ = InvalidateRect(_hwnd, (RECT*)null, true);
     }
 

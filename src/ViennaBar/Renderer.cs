@@ -56,10 +56,12 @@ internal sealed unsafe class Renderer : IDisposable
         }
     }
 
-    public void Resize(HWND hwnd, uint width, uint height)
+    public void Resize(nint hwndRaw, uint width, uint height)
     {
         if (_rt is not null && width == _w && height == _h) return;
         if (_rt is null && (width < 4 || height < 4)) return; // sliver: nada
+
+        HWND hwnd = new(hwndRaw);
 
         var prop = new D2D1_RENDER_TARGET_PROPERTIES
         {
@@ -72,10 +74,11 @@ internal sealed unsafe class Renderer : IDisposable
         };
         var hwndProp = new D2D1_HWND_RENDER_TARGET_PROPERTIES
         {
-            hwnd = hwnd,
+            hwnd = default,   // se setea abajo con el valor crudo (evita colisión HWND core/Gfx)
             pixelSize = new D2D_SIZE_U { width = width, height = height },
             presentOptions = D2D1_PRESENT_OPTIONS.D2D1_PRESENT_OPTIONS_NONE,
         };
+        *(nint*)&hwndProp.hwnd = hwndRaw;   // HWND es un nint de 8 bytes: asignación cruda
 
         ID2D1HwndRenderTarget* rtRaw = null;
         _factory->CreateHwndRenderTarget(&prop, &hwndProp, &rtRaw);

@@ -1,13 +1,13 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.Shell;
-using Windows.Win32.UI.Shell.Common;
 using static Windows.Win32.PInvoke;
+using Shell = ViennaBar.ShellNative.ShellNative;
 
 namespace ViennaBar;
 
-// StartDrawer — tercio inferior. Colapsado: botón Inicio + pins.
+// StartDrawer â€” tercio inferior. Colapsado: botÃ³n Inicio + pins.
 // Expandido: all-programs (desde AppCatalog cache) + search box + power.
 internal sealed class Drawer
 {
@@ -18,9 +18,9 @@ internal sealed class Drawer
     private readonly AppCatalog _catalog = new();
     private HWND _hwnd;
     private string _search = "";
-    private int _selIdx;                       // selección de teclado
+    private int _selIdx;                       // selecciÃ³n de teclado
     private int _topRow;                       // scroll virtual (primera fila visible)
-    private float _drawerAreaH = 400f;          // F2: métrica real del layout
+    private float _drawerAreaH = 400f;          // F2: mÃ©trica real del layout
 
     public static TextFormatHandle F;
     public static TextFormatHandle FBig;
@@ -41,7 +41,7 @@ internal sealed class Drawer
 
     public void FocusSearch() { /* la ventana ya gana foco al activarse con click */ }
 
-    // teclado: WM_CHAR escribe, KEYDOWN navega/ejecuta. true → repintar.
+    // teclado: WM_CHAR escribe, KEYDOWN navega/ejecuta. true â†’ repintar.
     public bool OnKey(uint msg, WPARAM wparam)
     {
         if (msg == WM_CHAR)
@@ -73,7 +73,7 @@ internal sealed class Drawer
         var results = CurrentResults();
         switch (vk)
         {
-            case 0x1B: // VK_ESCAPE: limpia búsqueda
+            case 0x1B: // VK_ESCAPE: limpia bÃºsqueda
                 if (_search.Length > 0) { _search = ""; _selIdx = 0; _topRow = 0; _resultsCache = null; return true; }
                 return false;
             case 0x26: // VK_UP
@@ -82,7 +82,7 @@ internal sealed class Drawer
             case 0x28: // VK_DOWN
                 if (_selIdx < results.Count - 1) { _selIdx++; ClampScroll(results.Count); return true; }
                 return false;
-            // VK_RETURN NO va acá: Enter produce WM_KEYDOWN + WM_CHAR('\r') —
+            // VK_RETURN NO va acÃ¡: Enter produce WM_KEYDOWN + WM_CHAR('\r') â€”
             // manejarlo en ambos = doble launch. Solo WM_CHAR lo lanza.
         }
         return false;
@@ -105,7 +105,7 @@ internal sealed class Drawer
 
     private int VisibleRows => Math.Max(1, (int)((_drawerAreaH - SearchH - StartBtnH - 12) / RowH));
 
-    // click dentro del área del drawer (coords locales al drawer).
+    // click dentro del Ã¡rea del drawer (coords locales al drawer).
     // Layout: search box [0..SearchH] | filas desde SearchH+2 (calza con Render).
     public void OnClick(int x, int y, int drawerH)
     {
@@ -122,7 +122,7 @@ internal sealed class Drawer
 
     private List<AppCatalog.AppEntry> CurrentResults()
     {
-        // cacheada: solo recompute al cambiar search o refrescar catálogo
+        // cacheada: solo recompute al cambiar search o refrescar catÃ¡logo
         if (_resultsCache is null || _cacheSearch != _search)
         {
             _resultsCache = (string.IsNullOrEmpty(_search)
@@ -136,11 +136,11 @@ internal sealed class Drawer
     private List<AppCatalog.AppEntry>? _resultsCache;
     private string? _cacheSearch;
 
-    // BHID_SFUIObject = "GetUIObjectOf" del item — ruta canónica para IContextMenu
+    // BHID_SFUIObject = "GetUIObjectOf" del item â€” ruta canÃ³nica para IContextMenu
     private static readonly Guid SfUiObjectGuid = BHID_SFUIObject;
 
-    // "open\0" ANSI persistente (InvokeCommand lee el LPCSTR mucho después
-    // del retorno — jamás stackalloc)
+    // "open\0" ANSI persistente (InvokeCommand lee el LPCSTR mucho despuÃ©s
+    // del retorno â€” jamÃ¡s stackalloc)
     private static readonly nint _openVerbPtr = InitOpenVerb();
 
     private static nint InitOpenVerb()
@@ -154,87 +154,32 @@ internal sealed class Drawer
         return p;
     }
 
-    private unsafe void Launch(AppCatalog.AppEntry entry)
+    private void Launch(AppCatalog.AppEntry entry)
     {
-        if (entry.Pidl is null || entry.Pidl.Length < 4)
-        {
-            Console.WriteLine($"[drawer] sin pidl snapshot: {entry.Name}");
-            return;
-        }
-
         try
         {
-            // 1) AppsFolder IShellFolder (ruta validada en el catálogo)
-            Guid iidItem = typeof(IShellItem).GUID;
-            var hr = SHGetKnownFolderItem(FOLDERID_AppsFolder, KNOWN_FOLDER_FLAG.KF_FLAG_DEFAULT, default, in iidItem, out var appsObj);
-            if (hr.Failed || appsObj is not IShellItem appsItem)
-            {
-                Console.WriteLine($"[drawer] appsfolder item FAIL");
-                return;
-            }
-
-            Guid bhid = BHID_SFObject;
-            Guid iidFolder = typeof(IShellFolder).GUID;
-            appsItem.BindToHandler(default, &bhid, &iidFolder, out var sfObj);
-            if (sfObj is not IShellFolder appsFolder)
-            {
-                Console.WriteLine($"[drawer] appsfolder bind FAIL");
-                return;
-            }
-
-            // 2) PIDL child restaurado del snapshot del catálogo (válido: salió
-            //    de la enumeración del propio AppsFolder — sin parse intermedio)
-            var child = (ITEMIDLIST*)Marshal.AllocCoTaskMem(entry.Pidl.Length);
-            Marshal.Copy(entry.Pidl, 0, (nint)child, entry.Pidl.Length);
-
+            // AppsFolder (padre de los items del catalogo) — API opaca nint
+            var appsFolder = Shell.OpenAppsFolder();
+            if (appsFolder == 0) return;
             try
             {
-                // 3) IContextMenu del item: QueryContextMenu (inicializa el handler
-                //    — InvokeCommand sin Query previo → E_INVALIDARG) + Invoke "open"
-                Guid iidMenu = typeof(IContextMenu).GUID;
-                appsFolder.GetUIObjectOf(default, 1, &child, &iidMenu, null, out var menuObj);
-                if (menuObj is not IContextMenu menu)
-                {
-                    Console.WriteLine($"[drawer] sin IContextMenu: {entry.Name}");
-                    return;
-                }
-
-                // QueryContextMenu con menú dummy: el handler registra sus comandos
-                var hmenu = CreatePopupMenu();
-                menu.QueryContextMenu(hmenu, 0, 1, 0x7FFF, 0);
-                _ = DestroyMenu(hmenu);
-
-                // struct CHICO (CMINVOKECOMMANDINFO): los handlers validan cbSize
-                var ici = new CMINVOKECOMMANDINFO
-                {
-                    cbSize = (uint)Marshal.SizeOf<CMINVOKECOMMANDINFO>(),
-                    lpVerb = (PCSTR)(byte*)_openVerbPtr, // "open" ANSI
-                    nShow = 5,                           // SW_SHOW
-                };
-                menu.InvokeCommand(&ici);
+                Shell.LaunchByPidl(appsFolder, entry.Pidl);
                 Console.WriteLine($"[drawer] launch OK: {entry.Name}");
             }
-            finally
-            {
-                Marshal.FreeCoTaskMem((nint)child);
-            }
-        }
-        catch (COMException cex)
-        {
-            Console.WriteLine($"[drawer] COM FAIL 0x{cex.HResult:X}: {entry.Name}");
+            finally { Shell.ReleaseFolder(appsFolder); }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[drawer] launch error {entry.Name}: {ex}");
+            Console.WriteLine($"[drawer] launch error {entry.Name}: {ex.Message}");
         }
     }
 
-    // orbe Vienna: círculo exterior glass + núcleo brillante (estilo Aero)
+    // orbe Vienna: cÃ­rculo exterior glass + nÃºcleo brillante (estilo Aero)
     private static void DrawOrb(RenderCtx ctx, float cx, float cy)
     {
         // halo exterior (glass celeste)
         ctx.FillEllipse(Skin.SheenTop, cx, cy, 11f, 11f);
-        // núcleo azul
+        // nÃºcleo azul
         ctx.FillEllipse(Skin.Btn, cx, cy, 8.5f, 8.5f);
         // highlight superior (reflejo)
         ctx.FillEllipse(Skin.White, cx - 2.5f, cy - 3.5f, 3.2f, 2.4f);
@@ -242,12 +187,12 @@ internal sealed class Drawer
 
     public void Render(RenderCtx ctx, int x, int y, int w, int h, bool open)
     {
-        // botón Inicio: orbe Vienna (círculo azul con highlight) + texto
+        // botÃ³n Inicio: orbe Vienna (cÃ­rculo azul con highlight) + texto
         float by = y + h - StartBtnH - 4;
         ctx.FillRect(Skin.Btn, 4, by, w - 8, StartBtnH);
 
-        // orbe: círculo blanco semitransparente con núcleo (sin ellipses API en
-        // RenderCtx aún → aproximación con 3 rects concéntricos suaves)
+        // orbe: cÃ­rculo blanco semitransparente con nÃºcleo (sin ellipses API en
+        // RenderCtx aÃºn â†’ aproximaciÃ³n con 3 rects concÃ©ntricos suaves)
         float cx = 16f, cy = by + StartBtnH / 2f;
         DrawOrb(ctx, cx, cy);
 
@@ -267,7 +212,7 @@ internal sealed class Drawer
         ctx.Text(string.IsNullOrEmpty(_search) ? "Buscar... " + caret : _search + caret, F, Skin.Text, 10, dy + 4);
         dy += SearchH + 2;
 
-        // filas con scroll + selección
+        // filas con scroll + selecciÃ³n
         var results = CurrentResults();
         int visible = VisibleRows;
         int first = Math.Min(_topRow, Math.Max(0, results.Count - 1));
