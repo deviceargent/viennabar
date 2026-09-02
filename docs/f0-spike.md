@@ -1,6 +1,37 @@
 # F0 — Spike ViennaBar
 
-PoC de validación de las piezas críticas antes del MVP. Cada spike es un proyecto de consola autocontenido (sin UI framework: solo P/Invoke crudos vía CsWin32). Gates al final.
+> F0 cerrado. Gates finales y hallazgos de F1 abajo.
+
+## Gates F0 — resultado final (2026-09-02)
+
+| Gate | Target | Medido | Estado |
+|---|---|---|---|
+| AppBar autohide CPU idle | 0 % | **0 ms** delta | ✓ |
+| RAM core idle | < 25 MB | **23.5 MB** (trimmed JIT) / 12.4 MB (AOT) | ✓ |
+| Binario AOT (spike S1, sin COM) | < 10 MB | **2.13 MB** (S1) / 1.4 MB | ✓ |
+| AppsFolder enum directo | < 150 ms | ~1.9 s → **cache+background** | ✓ (rediseño) |
+| SHChangeNotifyRegister | notificaciones | 9 SHCNE reales | ✓ |
+
+## Gates F1 — cierre (2026-09-02)
+
+| Gate | Target | Resultado |
+|---|---|---|
+| RAM idle | < 25 MB | **23.5 MB** ✓ (dev JIT build) |
+| CPU idle | 0 % | **0 ms** ✓ |
+| Arranque frío | < 350 ms | ✓ en JIT (~250 ms); **bloqueado en AOT** (ver abajo) |
+| Binario | < 10 MB | **2.13 MB AOT** (spike S1 sin COM); **ViennaBar AOT bloqueado por COM** |
+| Self-contained (fallback) | — | 65 MB, arranque ~4 s (extracción single-file), 61 MB RAM — **no aceptable como release**, sí como dev-drop |
+
+### Bloqueo AOT + COM (hallazgo mayor de F1)
+
+NativeAOT .NET 8 **no soporta COM interop built-in** (`Marshal.GetObjectForIUnknown`/CCW requieren `ComWrappers` registrados). Crash: `NotSupportedException: COM Interop requires ComWrapper instance registered for marshalling` en `D2D1CreateFactory`. Los spikes AOT (S1) funcionaron porque no usaban COM.
+
+**Caminos para F2** (el gate < 10 MB / < 350 ms AOT depende de esto):
+1. `Microsoft.Interop.ComWrappers.SourceGenerator` (oficial MS): genera ComWrappers para AOT — integrar y probar.
+2. CsWin32 con `allowMarshaling=false`: vtables crudas sin COM interop — reescritura de call sites (D2D/DWrite/shell), pero máxima ligereza.
+3. Híbrido: COM del shell via source-generated wrappers + D2D via vtables crudas.
+
+**Decisión interina**: desarrollo en JIT (gates verdes), release self-contained solo para testing manual. No bloquea F2.
 
 ## Spikes
 

@@ -2,7 +2,16 @@
 
 Barra lateral para Windows 11 (22H2+): explorador de archivos + dropzone + widgets + menú de inicio, como shell aditivo. Ligereza como requisito de diseño: un proceso residente, todo lazy.
 
-**Estado**: F0 (spike) — no compilable aún. Ver [docs/arquitectura.md](docs/arquitectura.md) y [docs/matriz-cobertura.md](docs/matriz-cobertura.md).
+**Estado**: **F1 completado (2026-09-02)** — sidebar funcional end-to-end. Ver [docs/arquitectura.md](docs/arquitectura.md) y [docs/f0-spike.md](docs/f0-spike.md) (gates y hallazgos).
+
+## Qué funciona (v0.1)
+
+- AppBar auto-hide en el borde izquierdo, 3 tercios (widgets/árbol/inicio), 23.5 MB RAM idle, 0% CPU
+- Árbol del namespace shell expandible (Este equipo, Escritorio, Descargas, Documentos)
+- Menú inicio (drawer) con las 122 apps del sistema + **búsqueda por teclado** (filtro en vivo, flechas, Enter)
+- Launch real de apps vía `IContextMenu` canónico (Win32, UWP y paneles)
+- Dropzone: arrastre de archivos desde el Explorer al stack
+- Render Direct2D/DirectWrite (sin GDI+, sin frameworks)
 
 ## Decisiones fijadas
 
