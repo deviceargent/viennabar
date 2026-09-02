@@ -58,11 +58,22 @@ internal sealed unsafe class App : IDisposable
             return 0;
         }
 
+        _ = Skin.LoadDefault();   // tokens + hot-reload watcher
         var tree = new ShellTree();
         var drawer = new Drawer();
         var app = new App(tree, drawer);
         Instance = app;
         return app.MessageLoop();
+    }
+
+    // hot-reload de skin: recrea brushes con tokens nuevos y repinta
+    internal void ReloadSkin(Skin skin)
+    {
+        // cross-thread: post al hilo UI
+        if (_hwnd != default)
+        {
+            _ = PostMessage(_hwnd, WM_APP + 2, 0, 0); // WM_APP+2 = reload skin
+        }
     }
 
     private int MessageLoop()
@@ -175,6 +186,8 @@ internal sealed unsafe class App : IDisposable
     }
 
     public void Invalidate() => _ = InvalidateRect(_hwnd, (RECT*)null, false);
+
+    private bool Hidden => _hidden;
 
     private void OnClick(int x, int y)
     {

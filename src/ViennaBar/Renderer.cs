@@ -92,7 +92,7 @@ internal sealed unsafe class Renderer : IDisposable
             _ = b->Release();
         }
         _brushes.Clear();
-        foreach (var (name, argb) in Skin.CacheBrushSpec)
+        foreach (var (name, argb) in Skin.Current.CacheBrushSpec)
             _brushes[name] = (nint)CreateBrush(argb);
     }
 
@@ -152,9 +152,30 @@ internal sealed unsafe class Renderer : IDisposable
             DWRITE_MEASURING_MODE.DWRITE_MEASURING_MODE_NATURAL);
     }
 
+    internal void _rt_FillEllipse(float cx, float cy, float rx, float ry, ID2D1SolidColorBrush* b)
+    {
+        var e = new Windows.Win32.Graphics.Direct2D.D2D1_ELLIPSE
+        {
+            point = new D2D_POINT_2F { x = cx, y = cy },
+            radiusX = rx,
+            radiusY = ry,
+        };
+        var brush = (Windows.Win32.Graphics.Direct2D.ID2D1Brush*)b;
+        AsRt(_rt)->FillEllipse(&e, brush);
+    }
+
     public TextFormatHandle Text9Handle => new((nint)_text9);
     public TextFormatHandle Text11bHandle => new((nint)_text11b);
     public TextFormatHandle TextBigHandle => new((nint)_text11b); // reloj: 11b bold
+
+    public void ReloadBrushes(HWND hwnd, uint width, uint height)
+    {
+        if (_rt is null) return;
+        foreach (var p in _brushes.Values) _ = ((ID2D1SolidColorBrush*)p)->Release();
+        _brushes.Clear();
+        foreach (var (name, argb) in Skin.Current.CacheBrushSpec)
+            _brushes[name] = (nint)CreateBrush(argb);
+    }
 
     public void Dispose()
     {
@@ -206,6 +227,12 @@ internal unsafe struct RenderCtx
         }
     }
 
+    public void FillEllipse(int argb, float cx, float cy, float rx, float ry)
+    {
+        var b = _owner.BrushPtr(BrushName(argb));
+        if (b is not null) _owner._rt_FillEllipse(cx, cy, rx, ry, b);
+    }
+
     private static D2D1_COLOR_F ArgbToColorF(int argb) => new()
     {
         r = ((argb >> 16) & 0xFF) / 255f,
@@ -214,19 +241,13 @@ internal unsafe struct RenderCtx
         a = ((argb >> 24) & 0xFF) / 255f,
     };
 
-    private static string BrushName(int argb) => argb switch
+    // mapea argb → brush cacheado del skin ACTUAL (tokens mutan en hot-reload)
+    private static string BrushName(int argb)
     {
-        Skin.Bg => "bg",
-        Skin.Text => "text",
-        Skin.Muted => "muted",
-        Skin.Divider => "divider",
-        Skin.Sel => "sel",
-        Skin.Btn => "btn",
-        Skin.White => "white",
-        Skin.Search => "search",
-        unchecked((int)0xFFC8E0EE) => "sheenTop",
-        _ => "text",
-    };
+        foreach (var (name, value) in Skin.Current.CacheBrushSpec)
+            if (value == argb) return name;
+        return "text"; // fallback
+    }
 }
 
 // handle opaco de text format para los módulos (sin exponer vtables)

@@ -229,12 +229,30 @@ internal sealed class Drawer
         }
     }
 
+    // orbe Vienna: círculo exterior glass + núcleo brillante (estilo Aero)
+    private static void DrawOrb(RenderCtx ctx, float cx, float cy)
+    {
+        // halo exterior (glass celeste)
+        ctx.FillEllipse(Skin.SheenTop, cx, cy, 11f, 11f);
+        // núcleo azul
+        ctx.FillEllipse(Skin.Btn, cx, cy, 8.5f, 8.5f);
+        // highlight superior (reflejo)
+        ctx.FillEllipse(Skin.White, cx - 2.5f, cy - 3.5f, 3.2f, 2.4f);
+    }
+
     public void Render(RenderCtx ctx, int x, int y, int w, int h, bool open)
     {
-        // botón Inicio: anclado abajo
+        // botón Inicio: orbe Vienna (círculo azul con highlight) + texto
         float by = y + h - StartBtnH - 4;
         ctx.FillRect(Skin.Btn, 4, by, w - 8, StartBtnH);
-        ctx.Text("Inicio", FBig, Skin.White, w / 2f - 24, by + (StartBtnH - 18) / 2);
+
+        // orbe: círculo blanco semitransparente con núcleo (sin ellipses API en
+        // RenderCtx aún → aproximación con 3 rects concéntricos suaves)
+        float cx = 16f, cy = by + StartBtnH / 2f;
+        DrawOrb(ctx, cx, cy);
+
+        // texto "Inicio" desplazado por el orbe
+        ctx.Text("Inicio", FBig, Skin.White, 34, by + (StartBtnH - 18) / 2);
 
         if (!open) return;
 
