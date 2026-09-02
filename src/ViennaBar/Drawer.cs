@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 using Windows.Win32;
 using Windows.Win32.Foundation;
-using Windows.Win32.Graphics.DirectWrite;
 using Windows.Win32.UI.Shell;
 using Windows.Win32.UI.Shell.Common;
 using static Windows.Win32.PInvoke;
@@ -23,8 +22,8 @@ internal sealed class Drawer
     private int _topRow;                       // scroll virtual (primera fila visible)
     private float _drawerAreaH = 400f;          // F2: métrica real del layout
 
-    public static IDWriteTextFormat F = null!;
-    public static IDWriteTextFormat FBig = null!;
+    public static TextFormatHandle F;
+    public static TextFormatHandle FBig;
 
     public void Attach(HWND hwnd)
     {
@@ -34,8 +33,8 @@ internal sealed class Drawer
 
     public void InitText(Renderer r)
     {
-        F = r.Text9;
-        FBig = r.Text11b;
+        F = r.Text9Handle;
+        FBig = r.Text11bHandle;
     }
 
     public void SetDrawerArea(float h) => _drawerAreaH = h;

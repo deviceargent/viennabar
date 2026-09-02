@@ -307,7 +307,7 @@ internal sealed unsafe class App : IDisposable
             ctx.Line(Skin.Divider, 0, WidgetsH, FullWidthPx, WidgetsH);
             ctx.Line(Skin.Divider, 0, WidgetsH + TreeH, FullWidthPx, WidgetsH + TreeH);
 
-            ctx.Text("widgets", _renderer.Text9, Skin.Muted, 8, 6, 260, 18);
+            ctx.Text("widgets", _renderer.Text9Handle, Skin.Muted, 8, 6, 260, 18);
 
             _tree.Render(ctx, 0, WidgetsH, FullWidthPx, TreeH);
             _drawer.SetDrawerArea(DrawerH);
