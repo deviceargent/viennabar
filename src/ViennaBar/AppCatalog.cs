@@ -13,7 +13,22 @@ namespace ViennaBar;
 // en background; el primer frame sale del cache).
 internal sealed unsafe class AppCatalog : IDisposable
 {
-    public sealed record AppEntry(string Name, string ParsingName);
+    public sealed record AppEntry(string Name, string ParsingName, byte[]? Pidl = null);
+
+    // extensions que NO son apps aunque el AppsFolder las liste (help, docs)
+    private static readonly string[] JunkExtensions =
+    {
+        ".chm", ".hlp", ".txt", ".htm", ".html", ".pdf", ".rtf",
+        ".doc", ".docx", ".nfo", ".ini", ".log",
+    };
+
+    private static bool IsLaunchable(string parsing)
+    {
+        if (parsing.StartsWith("::{") || !parsing.Contains('.')) return true; // namespace / UWP canonical
+        foreach (var ext in JunkExtensions)
+            if (parsing.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) return false;
+        return true;
+    }
 
     private List<AppEntry> _apps = new();
     private string _cachePath = null!;
@@ -26,6 +41,18 @@ internal sealed unsafe class AppCatalog : IDisposable
         var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ViennaBar");
         Directory.CreateDirectory(dir);
         _cachePath = Path.Combine(dir, "catalog.cache");
+
+        // version del formato: cambio de esquema → cache vieja se ignora
+        var versionFile = Path.Combine(dir, "catalog.version");
+        if (!File.Exists(versionFile) || File.ReadAllText(versionFile) != "2")
+        {
+            try
+            {
+                File.WriteAllText(versionFile, "2");
+                if (File.Exists(_cachePath)) File.Delete(_cachePath);
+            }
+            catch { }
+        }
 
         // primer frame: desde cache (si existe)
         LoadCache();
@@ -40,18 +67,18 @@ internal sealed unsafe class AppCatalog : IDisposable
         try
         {
             if (!File.Exists(_cachePath)) return;
-            var lines = File.ReadAllLines(_cachePath);
-            var list = new List<AppEntry>(lines.Length);
-            foreach (var line in lines)
+            using var br = new BinaryReader(File.OpenRead(_cachePath));
+            int n = br.ReadInt32();
+            var list = new List<AppEntry>(n);
+            for (int i = 0; i < n; i++)
             {
-                var idx = line.IndexOf('\t');
-                if (idx > 0)
-                    list.Add(new AppEntry(line[..idx], line[(idx + 1)..]));
+                string name = br.ReadString();
+                string parsing = br.ReadString();
+                int len = br.ReadInt32();
+                byte[] pidl = len > 0 ? br.ReadBytes(len) : Array.Empty<byte>();
+                list.Add(new AppEntry(name, parsing, pidl));
             }
-            if (list.Count > 0)
-            {
-                _apps = list;
-            }
+            if (list.Count > 0) _apps = list;
         }
         catch { /* cache corrupta: se regenera */ }
     }
@@ -60,10 +87,15 @@ internal sealed unsafe class AppCatalog : IDisposable
     {
         try
         {
-            var sb = new System.Text.StringBuilder();
+            using var bw = new BinaryWriter(File.Create(_cachePath));
+            bw.Write(_apps.Count);
             foreach (var a in _apps)
-                sb.AppendLine(a.Name.Replace('\t', ' ') + "\t" + a.ParsingName);
-            File.WriteAllText(_cachePath, sb.ToString());
+            {
+                bw.Write(a.Name);
+                bw.Write(a.ParsingName);
+                bw.Write(a.Pidl?.Length ?? 0);
+                if (a.Pidl is { Length: > 0 }) bw.Write(a.Pidl);
+            }
         }
         catch { /* sin permisos: seguimos sin cache */ }
     }
@@ -104,8 +136,14 @@ internal sealed unsafe class AppCatalog : IDisposable
                     apps.GetDisplayNameOf(child, SHGDNF.SHGDN_FORPARSING, &sr2);
                     string parsing = sr2.uType == 0 && sr2.Anonymous.pOleStr.Value != null
                         ? new string(sr2.Anonymous.pOleStr.Value) : string.Empty;
-                    if (name.Length > 0 && parsing.Length > 0)
-                        list.Add(new AppEntry(name, parsing));
+                    if (name.Length > 0 && parsing.Length > 0 && IsLaunchable(parsing))
+                    {
+                        // snapshot del PIDL (para activar via IContextMenu después)
+                        uint pidlSize = ILGetSize(child);
+                        byte[] pidl = new byte[pidlSize];
+                        Marshal.Copy((nint)child, pidl, 0, (int)pidlSize);
+                        list.Add(new AppEntry(name, parsing, pidl));
+                    }
                 }
                 finally { ILFree(child); }
             }

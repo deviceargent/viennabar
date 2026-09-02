@@ -12,6 +12,12 @@
 - Strings nativos: `fixed (char* s = "...")` → `PCWSTR`.
 - `LRESULT`: `return default;`, no `return 0;`.
 - **GUIDs COM: nunca escribirlos de memoria** — CsWin32 genera las constantes (`BHID_SFObject`, `CLSID_DragDropHelper`, …). Dos GUIDs manuales fallaron en F0 antes de adoptar esta regla.
+- **Activación de apps del AppsFolder** (lección F1, costó 5 iteraciones):
+  - Los AUMIDs (`{GUID}\app.exe`, `Microsoft.Windows.*`) NO se parsean con `SHCreateItemFromParsingName` ni contra el AppsFolder.
+  - Ruta que funciona: PIDL snapshot del enum → `IShellFolder.GetUIObjectOf(IContextMenu)` del AppsFolder.
+  - `InvokeCommand` REQUIERE `QueryContextMenu` previo (menú dummy con `CreatePopupMenu`) — sin él: E_INVALIDARG ("Value does not fall within the expected range" del wrapper).
+  - `CMINVOKECOMMANDINFO` chico + `lpVerb` = "open" ANSI **persistente** (nada de stackalloc: el handler lee el LPCSTR después del retorno).
+  - El E_INVALIDARG de COM llega como `ArgumentException` (no `COMException`) — catch genérico si se quiere log claro.
 
 ## Estado
 - F0: S1 ✓ (AppBar auto-hide: 1.4 MB AOT, 10.1 MB RAM, 0% CPU idle). S2–S6 pendientes.

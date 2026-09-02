@@ -248,7 +248,13 @@ internal sealed unsafe class App : IDisposable
                 return default;
 
             case WM_LBUTTONDBLCLK:
-                _ = DestroyWindow(hwnd);   // dev: doble clic cierra
+                // kill-switch dev: SOLO con archivo centinela %TEMP%\viennabar-kill
+                // (nunca cierra accidentalmente; debug: touch + doble clic en widgets)
+                if (GET_Y_LPARAM(lparam) < WidgetsH &&
+                    File.Exists(Path.Combine(Path.GetTempPath(), "viennabar-kill")))
+                {
+                    _ = DestroyWindow(hwnd);
+                }
                 return default;
 
             case WM_APP:
