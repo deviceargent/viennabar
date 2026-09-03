@@ -687,7 +687,7 @@ internal static class Program
         using (var k = hive.OpenSubKey(ifeo + @"\explorer.exe", false))
             Check(k is not null && (k.GetValue("Debugger") as string) == $"\"{launcher}\"",
                 "m2: Debugger citado");
-        Check(System.IO.File.Exists(link), "m2: hardlink creado");
+        Check(System.IO.File.Exists(link), "m2: copia creada");
         using (var k = hive.OpenSubKey(backup, false))
             Check(k is not null && (k.GetValue("HadKey") as int?) == 1
                 && (k.GetValue("Debugger") as string) == "old-dbg.exe"
@@ -706,7 +706,7 @@ internal static class Program
         using (var k = hive.OpenSubKey(ifeo + @"\explorer.exe", false))
             Check(k is not null && (k.GetValue("Debugger") as string) == "old-dbg.exe",
                 "m2: Debugger restaurado");
-        Check(!System.IO.File.Exists(link), "m2: hardlink propio se borra");
+        Check(!System.IO.File.Exists(link), "m2: copia propia se borra");
         Check(hive.OpenSubKey(backup, false) is null, "m2: backup se borra");
         Check(ViennaBar.Integration.RevertM2(hive, ifeo, hive, backup).Contains("nada que revertir"),
             "m2: revert sin backup");

@@ -174,12 +174,11 @@ internal static class Integration
 
     internal static string IfeoKeyPath(string ifeoRoot) => $"{ifeoRoot}\\explorer.exe";
 
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
-    private static extern bool CreateHardLinkW(string link, string target, nint reserved);
-
-    // Aplica el redirector IFEO. El passthrough usa un hardlink (mismo nombre
-    // distinto = IFEO no dispara) creado al lado del launcher: sin el, un
-    // switch desconocido entraria en loop, asi que sin link NO se escribe IFEO.
+    // Aplica el redirector IFEO. El passthrough usa una COPIA (explorer-vb.exe:
+    // distinto nombre = IFEO no dispara). Hardlink NO sirve: crear un hardlink
+    // a explorer.exe da win32=5 incluso elevado (proteccion del target).
+    // La copia conserva la firma Authenticode; se refresca en cada apply
+    // (drift ante Windows Update). Sin copia NO se escribe IFEO.
     // backupRoot vive en HKCU (write-once, leccion M1). Devuelve resumen.
     internal static string ApplyM2(RegistryKey hklm, string ifeoRoot, RegistryKey hkcu, string backupRoot,
         string launcherPath, string linkPath, string linkTarget, string rescueRegPath, bool requireAdmin = true)
@@ -193,18 +192,22 @@ internal static class Integration
         bool hadKey = cur is not null;
         string? oldDebugger = cur?.GetValue("Debugger") as string;
 
-        // hardlink idempotente (si falta se crea y se registra propiedad)
+        // copia idempotente (refresca ante drift de Windows Update)
         bool createdLink = false;
         if (!System.IO.File.Exists(linkPath))
         {
             int linkErr = 0;
             try
             {
-                createdLink = CreateHardLinkW(linkPath, linkTarget, 0);
-                if (!createdLink) linkErr = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+                System.IO.File.Copy(linkTarget, linkPath);
+                createdLink = true;
             }
-            catch { createdLink = false; linkErr = -1; }
-            if (!createdLink) return $"M2: no se pudo crear el hardlink {linkPath} (win32={linkErr}, sin cambios)";
+            catch (Exception ex)
+            {
+                createdLink = false;
+                linkErr = ex.HResult;
+            }
+            if (!createdLink) return $"M2: no se pudo copiar {linkTarget} a {linkPath} (hresult=0x{linkErr:X}, sin cambios)";
         }
 
         if (!haveBackup)
