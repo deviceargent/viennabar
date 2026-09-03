@@ -587,6 +587,14 @@ internal static class Program
         System.IO.Directory.CreateDirectory(sub);
         tree.ExpandToPath(sub);
         Check(FindNode(tree.Roots, sub) is not null, "nav: nodo destino en el tree");
+        // descenso desde raiz FS (Descargas/Escritorio): 2 niveles bajo la raiz
+        string deep = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+            "vb-navtest", "sub");
+        System.IO.Directory.CreateDirectory(deep);
+        tree.ExpandToPath(deep);
+        var deepNode = FindNode(tree.Roots, deep);
+        Check(deepNode is not null && deepNode.Expanded, "nav: desciende 2 niveles desde raiz FS");
         try
         {
             tree.ExpandToPath(@"C:\definitivamente-no-existe-xyz");
@@ -594,6 +602,8 @@ internal static class Program
         }
         catch (Exception ex) { Check(false, "nav: ruta mala no explota (" + ex.GetType().Name + ")"); }
         try { System.IO.Directory.Delete(System.IO.Path.GetDirectoryName(sub)!, true); } catch { }
+        try { System.IO.Directory.Delete(System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "vb-navtest"), true); } catch { }
         tree.Dispose();
         return _failures == 0 ? 0 : 1;
     }

@@ -179,8 +179,7 @@ internal sealed class ShellTree : IDisposable
             if (path.Equals(rd, StringComparison.OrdinalIgnoreCase)
                 || path.StartsWith(rd + "\\", StringComparison.OrdinalIgnoreCase))
             {
-                if (!r.Expanded) Expand(r);
-                App.Instance?.Invalidate();
+                WalkDown(r, path.Length > rd.Length ? path[(rd.Length + 1)..] : "");
                 return;
             }
         }
@@ -193,14 +192,23 @@ internal sealed class ShellTree : IDisposable
             && c.ParsingName.TrimEnd('\\').Equals(drive, StringComparison.OrdinalIgnoreCase));
         if (node is null) return;
         string rest = path.Length > drive.Length ? path[(drive.Length + 1)..] : "";
+        WalkDown(node, rest);
+    }
+
+    // desciende por segmentos expandiendo cada nivel (y el destino final).
+    // Match por display Name O por cola del ParsingName (nombres localizados).
+    private void WalkDown(TreeNode node, string rest)
+    {
         foreach (var seg in rest.Split('\\', StringSplitOptions.RemoveEmptyEntries))
         {
             if (!node.Expanded) Expand(node);
             var next = node.Children.Find(c => c.IsFolder
-                && c.Name.Equals(seg, StringComparison.OrdinalIgnoreCase));
+                && (c.Name.Equals(seg, StringComparison.OrdinalIgnoreCase)
+                    || c.ParsingName.TrimEnd('\\').EndsWith("\\" + seg, StringComparison.OrdinalIgnoreCase)));
             if (next is null) break;
             node = next;
         }
+        if (!node.Expanded) Expand(node);
         App.Instance?.Invalidate();
     }
 
