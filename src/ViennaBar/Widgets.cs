@@ -93,12 +93,13 @@ internal sealed class Widgets : IDisposable
         }
 
         // ---- portapapeles: ultimos textos (click = restaurar) ----
+        // header SIEMPRE (vacio = presente-sin-contenido, no desaparecido)
         _clipY0 = by;
         _clipN = 0;
+        ctx.Text(_clips.Count > 0 ? $"Clip ({_clips.Count})" : "Clip", AppText.Fmt, Skin.Muted, 12, by, w - 20, 14);
+        by += 15;
         if (_clips.Count > 0)
         {
-            ctx.Text($"Clip ({_clips.Count})", AppText.Fmt, Skin.Muted, 12, by, w - 20, 14);
-            by += 15;
             int n = Math.Min(_clips.Count, 2);
             for (int i = 0; i < n; i++)
             {
@@ -205,7 +206,12 @@ internal sealed class Widgets : IDisposable
     {
         try
         {
-            if (!OpenClipboard(_hwnd)) return;
+            // el portapapeles es un lock global: si otro proceso lo tiene
+            // abierto, reintentar (si no, ese contenido se pierde)
+            bool opened = false;
+            for (int i = 0; i < 3 && !(opened = OpenClipboard(_hwnd)); i++)
+                Thread.Sleep(15);
+            if (!opened) return;
             try
             {
                 var h = GetClipboardData(13);   // CF_UNICODETEXT

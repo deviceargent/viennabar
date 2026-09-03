@@ -199,12 +199,14 @@ internal sealed class ShellTree : IDisposable
     // Match por display Name O por cola del ParsingName (nombres localizados).
     private void WalkDown(TreeNode node, string rest)
     {
+        App.AppLog($"nav: walkdown desde {node.Name} rest=[{rest}]");
         foreach (var seg in rest.Split('\\', StringSplitOptions.RemoveEmptyEntries))
         {
             if (!node.Expanded) Expand(node);
             var next = node.Children.Find(c => c.IsFolder
                 && (c.Name.Equals(seg, StringComparison.OrdinalIgnoreCase)
                     || c.ParsingName.TrimEnd('\\').EndsWith("\\" + seg, StringComparison.OrdinalIgnoreCase)));
+            App.AppLog($"nav: seg=[{seg}] en {node.Name} ({node.Children.Count} hijos) -> {(next is null ? "MISS" : next.Name)}");
             if (next is null) break;
             node = next;
         }

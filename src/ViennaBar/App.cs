@@ -139,9 +139,10 @@ internal sealed unsafe class App : IDisposable
     {
         _dragActive = active;
         _widgets.SetDragOver(active);   // feedback visual del panel de drop
-        if (active && !_hidden)
+        if (active)
         {
-            _ = KillTimer(_hwnd, TimerHide);   // cancelar hide ya programado
+            if (_hidden) SetPos(FullWidthPx, hidden: false);   // revelar ante drag externo
+            else _ = KillTimer(_hwnd, TimerHide);   // cancelar hide ya programado
         }
     }
 
