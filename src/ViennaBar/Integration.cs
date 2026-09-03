@@ -185,6 +185,8 @@ internal static class Integration
         string launcherPath, string linkPath, string linkTarget, string rescueRegPath, bool requireAdmin = true)
     {
         if (requireAdmin && !IsElevated()) return "M2: se necesita terminal elevada (admin)";
+        if (!System.IO.File.Exists(launcherPath))
+            return $"M2: launcher no encontrado en {launcherPath} (sin cambios)";
         using var existing = hkcu.OpenSubKey(backupRoot, false);
         bool haveBackup = existing?.GetValue("HadKey") is not null;   // backup plano (sin subclaves)
         using var cur = hklm.OpenSubKey(IfeoKeyPath(ifeoRoot), false);

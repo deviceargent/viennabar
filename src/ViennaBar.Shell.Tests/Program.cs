@@ -676,11 +676,16 @@ internal static class Program
         System.IO.File.WriteAllText(target, "x");
         string link = System.IO.Path.Combine(blobDir, "link.exe");
         string regPath = System.IO.Path.Combine(blobDir, "m2.reg");
+        string launcher = System.IO.Path.Combine(blobDir, "launcher.exe");
+        System.IO.File.WriteAllText(launcher, "x");
+        Check(ViennaBar.Integration.ApplyM2(hive, ifeo, hive, backup,
+            System.IO.Path.Combine(blobDir, "noexiste.exe"), link, target, regPath, requireAdmin: false)
+            .Contains("no encontrado"), "m2: sin launcher aborta");
         string summary = ViennaBar.Integration.ApplyM2(hive, ifeo, hive, backup,
-            @"C:\fake\ViennaBar.Launcher.exe", link, target, regPath, requireAdmin: false);
+            launcher, link, target, regPath, requireAdmin: false);
         Check(summary.Contains("M2 aplicado"), "m2: apply resumen");
         using (var k = hive.OpenSubKey(ifeo + @"\explorer.exe", false))
-            Check(k is not null && (k.GetValue("Debugger") as string) == "\"C:\\fake\\ViennaBar.Launcher.exe\"",
+            Check(k is not null && (k.GetValue("Debugger") as string) == $"\"{launcher}\"",
                 "m2: Debugger citado");
         Check(System.IO.File.Exists(link), "m2: hardlink creado");
         using (var k = hive.OpenSubKey(backup, false))
@@ -691,8 +696,11 @@ internal static class Program
         Check(reg.Contains("HKEY_LOCAL_MACHINE") && reg.Contains("old-dbg.exe") && reg.Contains("ADMIN"),
             "m2: rescue .reg");
         string summary2 = ViennaBar.Integration.ApplyM2(hive, ifeo, hive, backup,
-            @"C:\otro\L.exe", link, target, regPath, requireAdmin: false);
+            launcher, link, target, regPath, requireAdmin: false);
         Check(summary2.Contains("conservado"), "m2: segundo apply conserva backup");
+        using (var k = hive.OpenSubKey(backup, false))
+            Check(k is not null && (k.GetValue("Debugger") as string) == "old-dbg.exe",
+                "m2: backup write-once");
         string back = ViennaBar.Integration.RevertM2(hive, ifeo, hive, backup);
         Check(back.Contains("M2 revertido"), "m2: revert resumen");
         using (var k = hive.OpenSubKey(ifeo + @"\explorer.exe", false))

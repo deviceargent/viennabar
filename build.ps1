@@ -19,4 +19,12 @@ if ($Publish) {
 } else {
     & $dotnet build ViennaBar.sln -c Release
 }
-exit $LASTEXITCODE
+$buildRc = $LASTEXITCODE
+# M2 dogfood: el launcher debe vivir JUNTO a ViennaBar.exe (--m2-apply lo
+# resuelve ahi; ApplyM2 aborta si falta). Release F5 lo empaquetara en serio.
+$lOut = "src\ViennaBar.Launcher\bin\Release\net8.0-windows"
+$bOut = "src\ViennaBar\bin\Release\net8.0-windows"
+foreach ($f in "ViennaBar.Launcher.exe", "ViennaBar.Launcher.dll", "ViennaBar.Launcher.runtimeconfig.json") {
+    if (Test-Path "$lOut\$f") { Copy-Item "$lOut\$f" $bOut -Force }
+}
+exit $buildRc
