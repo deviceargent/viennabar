@@ -3,7 +3,7 @@
 ## Build
 - Siempre compilar con `.\build.ps1` (inyecta `LIB`/`PATH` de VC++/SDK que NativeAOT requiere; sin eso `link.exe` falla con LNK1104 ucrt.lib).
 - `dotnet` no está en PATH de sesiones nuevas: usar `C:\Program Files\dotnet\dotnet.exe`.
-- `.\build.ps1 -Publish` publica el spike AppBar AOT. Pasar `-Project src\<spike>` para otro.
+- `.\build.ps1 -Publish` publica el exe AOT (~2MB, `PublishAot=true` incondicional en el csproj desde F2.1b — el publish SIEMPRE es AOT). Pasar `-Project src\<spike>` para otro.
 
 ## Reglas CsWin32 aprendidas (S1)
 - TFM obligatorio `net8.0-windows` + `<PlatformTarget>x64</PlatformTarget>` o el generator no emite nada.

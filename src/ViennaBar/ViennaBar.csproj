@@ -11,10 +11,11 @@
     <RootNamespace>ViennaBar</RootNamespace>
     <Version>0.1.0</Version>
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
-    <!-- PublishAot: BLOQUEADO por COM interop (D2D/DWrite/shell COM no soportado
-         en AOT .NET 8 sin ComWrappers). Tarea F2: migrar a ComWrappers SG o
-         CsWin32 allowMarshaling=false. Por ahora: self-contained sin trim. -->
-    <PublishAot Condition="'$(PublishAot)' == 'true'">true</PublishAot>
+    <!-- PublishAot: ACTIVO desde F2.1b (vtables crudas en Gfx+Shell, CCWs
+         manuales, cero COM interop). `dotnet publish -r win-x64` genera
+         SIEMPRE el exe AOT (~2MB). Incondicional a propósito: PublishAot
+         solo actúa en publish, el build normal no se ve afectado. -->
+    <PublishAot>true</PublishAot>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.106" PrivateAssets="all" />

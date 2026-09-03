@@ -1,8 +1,9 @@
 # Build ViennaBar — setup de entorno VC++/SDK para NativeAOT en esta máquina.
-# Uso: .\build.ps1 [-Publish] (por defecto build Release de toda la sln).
+# Uso: .\build.ps1 [-Publish] [-Project src\<spike>] (por defecto build
+# Release de toda la sln; -Publish publica el exe AOT de ViennaBar).
 param(
     [switch]$Publish,
-    [string]$Project = "src\ViennaBar.Spike.AppBar"
+    [string]$Project = "src\ViennaBar"
 )
 
 $dotnet = "C:\Program Files\dotnet\dotnet.exe"
