@@ -35,6 +35,7 @@ internal static class Program
             if (stage == "ccw") return StageCcw();
             if (stage == "skin") return StageSkin();
             if (stage == "cache") return StageCache();
+            if (stage == "log") return StageLog();
             if (stage == "headless") return StageHeadless();
 
             Log("stage1: OpenAppsFolder");
@@ -209,6 +210,7 @@ internal static class Program
         if (StageCcw() != 0) rc = 1;
         if (StageSkin() != 0) rc = 1;
         if (StageCache() != 0) rc = 1;
+        if (StageLog() != 0) rc = 1;
         Log(rc == 0 ? "=== headless ALL PASS" : "=== headless FAILURES");
         return rc;
     }
@@ -366,6 +368,34 @@ internal static class Program
         System.IO.File.WriteAllBytes(path, new byte[] { 9, 9, 9 });
         Check(ViennaBar.AppCatalog.ReadCache(path).Count == 0, "cache: corrupto -> empty");
         try { System.IO.File.Delete(path); } catch { }
+        return _failures == 0 ? 0 : 1;
+    }
+
+    private static int StageLog()
+    {
+        _failures = 0;
+        Log("-- log");
+        // el ring es global al proceso: medir lo previo para asserts deterministicos
+        int before = Shell.DebugSnapshot().Length;
+        Check(before < 256, $"log: ring previo={before} (<256)");
+        string sentinel = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "viennabar-debug");
+        Check(Shell.DebugEnabled == System.IO.File.Exists(sentinel), "log: DebugEnabled refleja sentinel");
+        for (int i = 0; i < 300; i++) Shell.DebugLog($"tmark{i}");
+        var snap = Shell.DebugSnapshot();
+        Check(snap.Length == 256, $"log: snapshot len={snap.Length}");
+        int first = 300 - 256;   // 300 markers > 256 slots: los 44 mas viejos
+        Check(snap[255] != null && snap[255].EndsWith($" tmark299"), "log: ultimo = tmark299");   // (y todo lo previo evictado)
+        Check(snap[0] != null && snap[0].EndsWith($" tmark{first}"), $"log: primero = tmark{first}");
+        bool ordered = true;
+        int prev = first - 1;
+        foreach (var line in snap)
+        {
+            int p = line != null ? line.LastIndexOf("tmark") : -1;
+            int n = p >= 0 && int.TryParse(line.Substring(p + 5), out int v) ? v : -1;
+            if (n != prev + 1) { ordered = false; break; }
+            prev = n;
+        }
+        Check(ordered, "log: ring ordenado y contiguo");
         return _failures == 0 ? 0 : 1;
     }
 }

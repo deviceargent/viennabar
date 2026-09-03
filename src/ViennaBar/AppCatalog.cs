@@ -28,11 +28,7 @@ internal sealed unsafe class AppCatalog : IDisposable
     private Thread? _refreshThread;
 
     public IReadOnlyList<AppEntry> Apps => _apps;
-    private static void Log(string s)
-    {
-        try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "viennabar-app.log"), $"{DateTime.Now:HH:mm:ss} {s}\n"); }
-        catch { }
-    }
+    private static void Log(string s) => Shell.DebugLog(s);
 
     public void Attach()
     {

@@ -180,15 +180,50 @@ internal static unsafe class ShellNative
             parent->GetUIObjectOf(default, 1, &child, in iidMenu, out var raw);
             return (IContextMenu*)raw;
         }
-        catch (Exception ex) { DebugLog($"GetContextMenu FAIL: {ex.Message}"); return null; }
+        catch (Exception ex) { SLog($"GetContextMenu FAIL: {ex.Message}"); return null; }
     }
 
-    // debug-log del shell (repro 0xC0000005 F2.1b)
+    // ---- logging central: ring buffer SIEMPRE, archivo solo con sentinel ----
+    // Costo en camino feliz: un Interlocked + store en memoria (cero I/O).
+    // El archivo %TEMP%\viennabar-app.log solo se escribe si existe el
+    // centinela %TEMP%\viennabar-debug (mismo patron que viennabar-kill).
+    // En un crash nativo, CrashDiag vuelca el ring al viennabar-crash.log,
+    // asi que la evidencia forense sobrevive sin I/O en steady-state.
+    // Hub compartido con el core (InternalsVisibleTo ViennaBar): el core
+    // llama DebugLog directo; el shell usa SLog (agrega el tag).
+    internal static readonly bool DebugEnabled = CheckDebugSentinel();
+
+    private static bool CheckDebugSentinel()
+    {
+        try { return System.IO.File.Exists(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "viennabar-debug")); }
+        catch { return false; }
+    }
+
+    private static readonly string[] _ring = new string[256];
+    private static int _head;   // total escritos (Interlocked)
+
     internal static void DebugLog(string s)
     {
-        try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "viennabar-app.log"), $"{DateTime.Now:HH:mm:ss.fff} [shell] {s}\n"); }
+        string line = $"{DateTime.Now:HH:mm:ss.fff} {s}";
+        int i = System.Threading.Interlocked.Increment(ref _head);
+        _ring[(i - 1) & 255] = line;
+        if (!DebugEnabled) return;
+        try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "viennabar-app.log"), line + "\n"); }
         catch { }
     }
+
+    // snapshot ordenado (mas viejo -> mas nuevo) para el crash-log y tests
+    internal static string[] DebugSnapshot()
+    {
+        int total = System.Threading.Volatile.Read(ref _head);
+        int n = Math.Min(total, _ring.Length);
+        var snap = new string[n];
+        int start = total - n;
+        for (int k = 0; k < n; k++) snap[k] = _ring[(start + k) & 255] ?? "(null)";
+        return snap;
+    }
+
+    private static void SLog(string s) => DebugLog("[shell] " + s);
 
     // ---------- launch (IContextMenu canÃ³nico â€” lecciones F1) ----------
     public static void LaunchByPidl(IShellFolder* parentFolder, byte[] childPidl)
@@ -237,9 +272,9 @@ internal static unsafe class ShellNative
         var child = RestorePidl(childPidl);
         try
         {
-            DebugLog($"ctx: begin (pidl {childPidl.Length}B, screen {screenX},{screenY})");
+            SLog($"ctx: begin (pidl {childPidl.Length}B, screen {screenX},{screenY})");
             var menu = GetContextMenu(parentFolder, child);
-            DebugLog($"ctx: menu ptr={(nint)menu != 0}");
+            SLog($"ctx: menu ptr={(nint)menu != 0}");
             if (menu is null) return;
             try
             {
@@ -247,11 +282,11 @@ internal static unsafe class ShellNative
                 try
                 {
                     menu->QueryContextMenu(hmenu, 0, 1, 0x7FFF, 0);
-                    DebugLog("ctx: QueryContextMenu OK, TrackPopupMenu...");
+                    SLog("ctx: QueryContextMenu OK, TrackPopupMenu...");
                     int cmd = TrackPopupMenu(hmenu,
                         TRACK_POPUP_MENU_FLAGS.TPM_RETURNCMD | TRACK_POPUP_MENU_FLAGS.TPM_RIGHTBUTTON,
                         screenX, screenY, 0, hwnd, null);
-                    DebugLog($"ctx: TrackPopupMenu returned cmd={cmd}");
+                    SLog($"ctx: TrackPopupMenu returned cmd={cmd}");
                     if (cmd <= 0) return;
                     var ici = new CMINVOKECOMMANDINFO
                     {
@@ -260,7 +295,7 @@ internal static unsafe class ShellNative
                         nShow = 5,
                     };
                     menu->InvokeCommand(in ici);
-                    DebugLog("ctx: InvokeCommand returned");
+                    SLog("ctx: InvokeCommand returned");
                 }
                 finally { _ = DestroyMenu(hmenu); }
             }

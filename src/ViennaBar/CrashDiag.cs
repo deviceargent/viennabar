@@ -38,6 +38,15 @@ internal static unsafe class CrashDiag
             if (code == unchecked((int)0xC0000005))
                 LogLine($"  access=0x{(int)rec->ExceptionInformation[0]} target=0x{(nint)rec->ExceptionInformation[1]:X}");
             WriteMinidump();
+            // evidencia forense sin I/O en steady-state: el ring del DebugLog
+            // (ultimas 256 lineas) sobrevive al crash aunque el archivo de
+            // debug estuviera apagado (sin centinela viennabar-debug)
+            try
+            {
+                foreach (var line in ViennaBar.ShellNative.ShellNative.DebugSnapshot())
+                    LogLine("  ring: " + line);
+            }
+            catch { }
         }
         catch { }
         _dumping = false;

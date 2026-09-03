@@ -12,11 +12,8 @@ namespace ViennaBar;
 // AOT-safe). Render por invalidaciÃ³n; brushes/formats cacheados una vez.
 internal sealed unsafe class Renderer : IDisposable
 {
-    internal static void AppLog(string s)
-    {
-        try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "viennabar-app.log"), $"{DateTime.Now:HH:mm:ss.fff} {s}\n"); }
-        catch { }
-    }
+    internal static void AppLog(string s) =>
+        ShellNative.ShellNative.DebugLog(s);
 
     private ID2D1Factory* _factory;
     private ID2D1HwndRenderTarget* _rt;

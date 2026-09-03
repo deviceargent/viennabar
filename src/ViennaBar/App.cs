@@ -261,11 +261,8 @@ internal sealed unsafe class App : IDisposable
         }
     }
 
-    internal static void AppLog(string s)
-    {
-        try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "viennabar-app.log"), $"{DateTime.Now:HH:mm:ss.fff} {s}\n"); }
-        catch { }
-    }
+    internal static void AppLog(string s) =>
+        ViennaBar.ShellNative.ShellNative.DebugLog(s);
 
     private void OnClick(int x, int y)
     {

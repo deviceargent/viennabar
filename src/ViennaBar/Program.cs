@@ -7,8 +7,7 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "viennabar-app.log"), $"{DateTime.Now:HH:mm:ss.fff} Main enter\n"); }
-        catch { }
+        ViennaBar.ShellNative.ShellNative.DebugLog("Main enter");
 
         // crash-log: toda excepción no manejada queda en %TEMP%\viennabar-crash.log
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>

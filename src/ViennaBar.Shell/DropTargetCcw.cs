@@ -107,11 +107,8 @@ internal unsafe class DropTargetCcw : IDisposable
     private static DropTargetCcw FromCom(ComObject* self) =>
         (DropTargetCcw)GCHandle.FromIntPtr((nint)self->Managed).Target!;
 
-    private static void Log(string s)
-    {
-        try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "viennabar-app.log"), $"{DateTime.Now:HH:mm:ss.fff} {s}\n"); }
-        catch { }
-    }
+    // log central (ring siempre, archivo con sentinel): ver ShellNative
+    private static void Log(string s) => ShellNative.DebugLog("[ccw] " + s);
 
     // ---- lÃ³gica managed (override por el core) ----
     protected virtual int OnDragEnter(void* dataObj, uint keyState, PointL pt, uint* effect)
