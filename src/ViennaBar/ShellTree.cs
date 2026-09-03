@@ -154,7 +154,7 @@ internal sealed class ShellTree : IDisposable
         {
             var (node, depth) = rows[i];
             float cy = y + 4 + (i - _topRow) * RowH;
-            if (ReferenceEquals(node, _selected) || (depth == 0 && node.Expanded))
+            if (ReferenceEquals(node, _selected))
                 ctx.FillRect(Skin.Sel, x + 2, cy - 1, w - 8, RowH);
             string indent = depth == 0 ? "" : "    ";
             string mark = node.IsFolder ? (node.Expanded ? "- " : "+ ") : "  ";

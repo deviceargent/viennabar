@@ -13,6 +13,7 @@ internal sealed class Config : IDisposable
     public uint RevealMs = 80;
     public uint HideMs = 400;
     public string Skin = "default";
+    public bool StayOpen = false;   // dev: suprime el auto-hide (fotos/tests visuales)
 
     private static readonly string Dir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ViennaBar");
@@ -46,6 +47,8 @@ internal sealed class Config : IDisposable
                 var name = Path.GetFileName(s.GetString() ?? "");
                 if (name.Length > 0) c.Skin = name;
             }
+            if (r.TryGetProperty("stayOpen", out var so) && so.ValueKind == JsonValueKind.True)
+                c.StayOpen = true;
         }
         catch { /* config roto: defaults quedan */ }
         return c;

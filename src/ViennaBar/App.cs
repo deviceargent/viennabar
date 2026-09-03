@@ -37,9 +37,11 @@ internal sealed unsafe class App : IDisposable
 
     private int ClientH => Math.Max(1, _clientH);
     private int _clientH;
-    private int WidgetsH => ClientH / 3;
-    private int TreeH => ClientH / 3;
-    private int DrawerH => ClientH - WidgetsH - TreeH;
+    // layout: widgets compacto fijo, drawer fijo, tree flexible (come el resto).
+    // El panel del widgets murio en F2.5: su tercio quedaba 2/3 vacio.
+    private int WidgetsH => 190;
+    private int DrawerH => 344;
+    private int TreeH => Math.Max(150, ClientH - WidgetsH - DrawerH);
 
     public static App? Instance { get; private set; }
 
@@ -269,6 +271,10 @@ internal sealed unsafe class App : IDisposable
         _ = SHAppBarMessage(ABM_SETPOS, ref abd);
         AppLog($"setpos: abd.rc = L{abd.rc.left} T{abd.rc.top} R{abd.rc.right} B{abd.rc.bottom} (w={widthPx}, hidden={hidden})");
 
+        // el alto REAL es el del rect appbar (work area sin taskbar), NO el del
+        // monitor: de el derivan los tercios (un shift de 48px escondia el boton)
+        _clientH = abd.rc.bottom - abd.rc.top;
+
         _ = SetWindowPos(_hwnd, default, abd.rc.left, abd.rc.top,
             abd.rc.right - abd.rc.left, abd.rc.bottom - abd.rc.top,
             SET_WINDOW_POS_FLAGS.SWP_NOZORDER | SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE);
@@ -478,8 +484,8 @@ internal sealed unsafe class App : IDisposable
                     case TimerHide:
                         _ = KillTimer(hwnd, TimerHide);
                         // el LEAVE puede haber sido espurio (drag OLE / capture):
-                        // solo ocultar si el cursor salio de verdad
-                        if (!_hidden && !CursorInsideWindow())
+                        // solo ocultar si el cursor salio de verdad (y no en modo foto)
+                        if (!_hidden && !Config.Current.StayOpen && !CursorInsideWindow())
                         {
                             SetPos(SliverPx, hidden: true);
                         }

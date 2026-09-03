@@ -68,6 +68,25 @@ internal sealed unsafe class Renderer : IDisposable
                 throw;
             }
             if (fmtRaw is null) throw new InvalidOperationException("CreateTextFormat null");
+            try
+            {
+                // una linea, truncation con ellipsis: los nombres largos del
+                // tree NO deben derramarse sobre las filas vecinas
+                fmtRaw->SetWordWrapping(DWRITE_WORD_WRAPPING.DWRITE_WORD_WRAPPING_NO_WRAP);
+                try
+                {
+                    IDWriteInlineObject* sign = null;
+                    _dw->CreateEllipsisTrimmingSign(fmtRaw, &sign);
+                    var trim = new DWRITE_TRIMMING
+                    {
+                        granularity = DWRITE_TRIMMING_GRANULARITY.DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+                    };
+                    fmtRaw->SetTrimming(&trim, sign);
+                    // sign: 2 objetos en vida del proceso, costo cero (leak intencional)
+                }
+                catch { }
+            }
+            catch (Exception ex) { AppLog($"trim setup FAIL (no fatal): {ex.Message}"); }
             return fmtRaw;
         }
     }
