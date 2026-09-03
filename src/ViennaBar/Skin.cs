@@ -20,15 +20,15 @@ internal sealed class Skin : IDisposable
     public static int Search => Current._search;
     public static int SheenTop => Current._sheenTop;
 
-    private int _bg = unchecked((int)0xFFE8F0F7);
-    private int _text = unchecked((int)0xFF1A3A50);
-    private int _muted = unchecked((int)0xFF4A6A80);
-    private int _divider = unchecked((int)0xFF5A9EC4);
-    private int _sel = unchecked((int)0xFF9ED4EE);
-    private int _btn = unchecked((int)0xFF3A86C4);
+    private int _bg = unchecked((int)0xFFDCE9F5);
+    private int _text = unchecked((int)0xFF16324A);
+    private int _muted = unchecked((int)0xFF3D6A8A);
+    private int _divider = unchecked((int)0xFF2E7CC4);
+    private int _sel = unchecked((int)0xFF8ACBEF);
+    private int _btn = unchecked((int)0xFF2E7CC4);
     private int _white = unchecked((int)0xFFFFFFFF);
-    private int _search = unchecked((int)0xFFE6F5FC);
-    private int _sheenTop = unchecked((int)0xFFC8E0EE);
+    private int _search = unchecked((int)0xFFD4E9F7);
+    private int _sheenTop = unchecked((int)0xFFB8D8EC);
 
     private static readonly string SkinDir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ViennaBar");

@@ -339,6 +339,7 @@ internal sealed unsafe class App : IDisposable
             int rc = Shell.FileOperation((nint)_hwnd.Value, cmd == 1 ? Shell.FO_MOVE : Shell.FO_COPY,
                 paths, dest, Shell.FOF_ALLOWUNDO);
             AppLog($"dropmenu: cmd={cmd} dest={dest} rc=0x{rc:X}");
+            if (rc == 0) _tree.ExpandToPath(dest);   // feedback: mostrar el destino
         }
         else if (cmd == 3)
         {
@@ -564,6 +565,18 @@ internal sealed unsafe class App : IDisposable
             case WM_CLIPBOARDUPDATE:
                 _widgets.OnClipboardUpdate();
                 return default;
+
+            case WM_MOUSEWHEEL:
+            {
+                // scroll del tree (solo sobre su tercio)
+                int wy = GET_Y_LPARAM(lparam);
+                if (wy >= WidgetsH && wy < WidgetsH + TreeH)
+                {
+                    short delta = (short)((lparam.Value >> 16) & 0xFFFF);
+                    _tree.ScrollBy(-delta / 120 * 3, TreeH);
+                }
+                return default;
+            }
 
             case WM_APP + 4:
             {

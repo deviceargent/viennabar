@@ -68,6 +68,7 @@ internal sealed class ShellTree : IDisposable
     {
         var node = HitTest(y, width, height);
         if (node is null) return;
+        _selected = node;
         if (node.IsFolder)
         {
             if (!node.Expanded && node.Children.Count == 0) Expand(node);
@@ -140,30 +141,81 @@ internal sealed class ShellTree : IDisposable
         return null;
     }
 
+    private const float RowH = 18f;
+
     public void Render(RenderCtx ctx, int x, int y, int w, int h)
     {
-        float cy = y + 4;
-        const float rowH = 18f;
-
-        foreach (var root in Roots)
+        _treeH = h;
+        var rows = VisibleNodes();
+        int visible = Math.Max(1, (int)(h / RowH));
+        _topRow = Math.Min(_topRow, Math.Max(0, rows.Count - visible));
+        int last = Math.Min(_topRow + visible, rows.Count);
+        for (int i = _topRow; i < last; i++)
         {
-            if (cy + rowH > y + h) return;
-            if (root.Expanded) ctx.FillRect(Skin.Sel, x + 2, cy - 1, w - 8, rowH);
-            ctx.Text((root.Expanded ? "- " : "+ ") + root.Name, AppText.Fmt, Skin.Text, x + 8, cy, w - 20);
-            cy += rowH;
-            if (root.Expanded)
-            {
-                foreach (var c in root.Children)
-                {
-                    if (cy + rowH > y + h) return;
-                    ctx.Text("    " + (c.IsFolder ? (c.Expanded ? "- " : "+ ") : "  ") + c.Name, AppText.Fmt, Skin.Text, x + 8, cy, w - 20);
-                    cy += rowH;
-                }
-            }
+            var (node, depth) = rows[i];
+            float cy = y + 4 + (i - _topRow) * RowH;
+            if (ReferenceEquals(node, _selected) || (depth == 0 && node.Expanded))
+                ctx.FillRect(Skin.Sel, x + 2, cy - 1, w - 8, RowH);
+            string indent = depth == 0 ? "" : "    ";
+            string mark = node.IsFolder ? (node.Expanded ? "- " : "+ ") : "  ";
+            ctx.Text(indent + mark + node.Name, AppText.Fmt, Skin.Text, x + 8, cy, w - 20);
         }
     }
 
+    // filas visibles planas (raiz + hijos de expandidas) para render/hit/scroll
+    private List<(TreeNode node, int depth)> VisibleNodes()
+    {
+        var list = new List<(TreeNode, int)>();
+        foreach (var root in Roots)
+        {
+            list.Add((root, 0));
+            if (root.Expanded)
+                foreach (var c in root.Children) list.Add((c, 1));
+        }
+        return list;
+    }
+
+    private int _topRow;
+    private int _treeH;
+    internal int TopRow => _topRow;
+    internal TreeNode? Selected => _selected;
+    private TreeNode? _selected;
+
+    internal void ScrollBy(int lines, int height)
+    {
+        int visible = Math.Max(1, height / 18);
+        int max = Math.Max(0, VisibleNodes().Count - visible);
+        _topRow = Math.Clamp(_topRow + lines, 0, max);
+        App.Instance?.Invalidate();
+    }
+
+    // lleva el nodo a la vista (usado tras navegar/invocar)
+    internal void EnsureVisible(TreeNode node, int height)
+    {
+        var rows = VisibleNodes();
+        int idx = rows.FindIndex(r => ReferenceEquals(r.node, node));
+        if (idx < 0) return;
+        int visible = Math.Max(1, height / 18);
+        if (idx < _topRow) _topRow = idx;
+        else if (idx >= _topRow + visible) _topRow = idx - visible + 1;
+        App.Instance?.Invalidate();
+    }
+
+    internal void Select(TreeNode node, int height)
+    {
+        _selected = node;
+        EnsureVisible(node, height);
+    }
+
     internal TreeNode? HitTestNode(int y, int width, int height) => HitTest(y, width, height);
+
+    private TreeNode? HitTest(int y, int width, int height)
+    {
+        var rows = VisibleNodes();
+        int idx = (int)(y / RowH) + _topRow;
+        if (idx < 0 || idx >= rows.Count) return null;
+        return rows[idx].node;
+    }
 
     // M1 --open-folder: expande la cadena hasta la carpeta (lo que exista).
     // 1) raiz FS directa (Escritorio/Descargas/Documentos) 2) via Este equipo.
@@ -211,27 +263,9 @@ internal sealed class ShellTree : IDisposable
             node = next;
         }
         if (!node.Expanded) Expand(node);
+        _selected = node;
+        EnsureVisible(node, _treeH);
         App.Instance?.Invalidate();
-    }
-
-    private TreeNode? HitTest(int y, int width, int height)
-    {
-        const float rowH = 18f;
-        float cy = 4;
-        foreach (var root in Roots)
-        {
-            if (y < cy + rowH && y >= cy) return root;
-            cy += rowH;
-            if (root.Expanded)
-            {
-                foreach (var c in root.Children)
-                {
-                    if (y < cy + rowH && y >= cy) return c;
-                    cy += rowH;
-                }
-            }
-        }
-        return null;
     }
 
     public void Dispose()

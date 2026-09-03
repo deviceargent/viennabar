@@ -168,6 +168,7 @@ GetWindowRect
 ClientToScreen
 WM_RBUTTONUP
 WM_RBUTTONDOWN
+WM_MOUSEWHEEL
 SetCapture
 ReleaseCapture
 GetCapture

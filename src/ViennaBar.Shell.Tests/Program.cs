@@ -354,11 +354,11 @@ internal static class Program
         System.IO.File.WriteAllText(path, "{no es json");
         var broken = ViennaBar.Skin.LoadFromPath(path);
         var bspec = broken.CacheBrushSpec.ToDictionary(t => t.Item1, t => t.Item2);
-        Check(bspec["bg"] == unchecked((int)0xFFE8F0F7), "skin: json roto -> defaults");
+        Check(bspec["bg"] == unchecked((int)0xFFDCE9F5), "skin: json roto -> defaults");
         System.IO.File.Delete(path);
         var missing = ViennaBar.Skin.LoadFromPath(path);
         var mspec = missing.CacheBrushSpec.ToDictionary(t => t.Item1, t => t.Item2);
-        Check(mspec["bg"] == unchecked((int)0xFFE8F0F7), "skin: sin archivo -> defaults");
+        Check(mspec["bg"] == unchecked((int)0xFFDCE9F5), "skin: sin archivo -> defaults");
         // packaging: skins/<nombre>/ > legacy > ruta empaquetada (para crear)
         string appDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-skintest");
         string night = System.IO.Path.Combine(appDir, "skins", "noche", "skin.json");
@@ -603,6 +603,12 @@ internal static class Program
         tree.ExpandToPath(deep);
         var deepNode = FindNode(tree.Roots, deep);
         Check(deepNode is not null && deepNode.Expanded, "nav: desciende 2 niveles desde raiz FS");
+        Check(tree.Selected is not null && tree.Selected.ParsingName.TrimEnd('\\')
+            .Equals(deep.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase), "nav: select destino");
+        tree.ScrollBy(9999, 360);
+        Check(tree.TopRow >= 0, "nav: scroll clamp alto");
+        tree.ScrollBy(-9999, 360);
+        Check(tree.TopRow == 0, "nav: scroll clamp cero");
         try
         {
             tree.ExpandToPath(@"C:\definitivamente-no-existe-xyz");

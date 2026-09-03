@@ -176,15 +176,32 @@ internal sealed class Drawer
         }
     }
 
-    // orbe Vienna: cÃ­rculo exterior glass + nÃºcleo brillante (estilo Aero)
-    private static void DrawOrb(RenderCtx ctx, float cx, float cy)
+    // ---- boton Inicio estilo clasico: rectangulo abajo de todo ----
+    // Area definida: (4, by, w-8, StartBtnH), logo en (LogoX, centrado, 24px).
+    // Soporte PNG futuro: skins/<nombre>/start.png se pinta DENTRO del rect
+    // del logo (DrawBitmap con estas mismas coords); hoy placeholder flat.
+    private const float LogoPx = 24f;
+    private const float LogoX = 10f;
+
+    private void RenderStartButton(RenderCtx ctx, int x, int y, int w, int h)
     {
-        // halo exterior (glass celeste)
-        ctx.FillEllipse(Skin.SheenTop, cx, cy, 11f, 11f);
-        // núcleo azul
-        ctx.FillEllipse(Skin.Btn, cx, cy, 8.5f, 8.5f);
-        // highlight superior (reflejo)
-        ctx.FillEllipse(Skin.White, cx - 2.5f, cy - 3.5f, 3.2f, 2.4f);
+        float by = y + h - StartBtnH - 4;
+        // cuerpo
+        ctx.FillRect(Skin.Btn, 4, by, w - 8, StartBtnH);
+        // relieve clasico: luz arriba/izq, sombra abajo/der
+        ctx.Line(Skin.White, 4, by, w - 4, by);
+        ctx.Line(Skin.White, 4, by, 4, by + StartBtnH);
+        ctx.Line(Skin.Divider, 4, by + StartBtnH, w - 4, by + StartBtnH);
+        ctx.Line(Skin.Divider, w - 4, by, w - 4, by + StartBtnH);
+        // ancla del logo (futura start.png del skin)
+        float ly = by + (StartBtnH - LogoPx) / 2;
+        ctx.FillRect(Skin.SheenTop, LogoX, ly, LogoPx, LogoPx);
+        ctx.Line(Skin.Divider, LogoX, ly, LogoX + LogoPx, ly);
+        ctx.Line(Skin.Divider, LogoX, ly + LogoPx, LogoX + LogoPx, ly + LogoPx);
+        ctx.Line(Skin.Divider, LogoX, ly, LogoX, ly + LogoPx);
+        ctx.Line(Skin.Divider, LogoX + LogoPx, ly, LogoX + LogoPx, ly + LogoPx);
+        // etiqueta
+        ctx.Text("Inicio", FBig, Skin.White, LogoX + LogoPx + 8, by + (StartBtnH - 18) / 2, w - 60, 18);
     }
 
     // ---- superficie de drop (drawer colapsado): grid de thumbnails ----
@@ -280,21 +297,11 @@ internal sealed class Drawer
 
     public void Render(RenderCtx ctx, int x, int y, int w, int h, bool open)
     {
-        // botón Inicio: orbe Vienna (círculo azul con highlight) + texto
-        float by = y + h - StartBtnH - 4;
-        ctx.FillRect(Skin.Btn, 4, by, w - 8, StartBtnH);
-
-        // orbe: círculo blanco semitransparente con núcleo (sin ellipses API en
-        // RenderCtx aún → aproximación con 3 rects concéntricos suaves)
-        float cx = 16f, cy = by + StartBtnH / 2f;
-        DrawOrb(ctx, cx, cy);
-
-        // texto "Inicio" desplazado por el orbe
-        ctx.Text("Inicio", FBig, Skin.White, 34, by + (StartBtnH - 18) / 2);
+        RenderStartButton(ctx, x, y, w, h);
 
         if (!open)
         {
-            RenderDropZone(ctx, x, y, w, (int)(by - y - 4));
+            RenderDropZone(ctx, x, y, w, (int)(y + h - StartBtnH - 4 - y - 4));
             return;
         }
 
