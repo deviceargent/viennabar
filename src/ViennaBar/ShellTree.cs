@@ -78,9 +78,15 @@ internal sealed class ShellTree : IDisposable
 
     public void OnRightClick(int x, int y, int width, int height)
     {
+        App.AppLog($"tree: rightclick at {x},{y}");
         var node = HitTest(y, width, height);
-        if (node?.Pidl is null || node.Pidl.Length < 4) return;
+        if (node?.Pidl is null || node.Pidl.Length < 4)
+        {
+            App.AppLog($"tree: rightclick SIN nodo valido (node={node?.Name ?? "null"}, pidlLen={node?.Pidl?.Length ?? -1})");
+            return;
+        }
         _ = GetCursorPos(out var ptScreen);
+        App.AppLog($"tree: rightclick nodo={node.Name} parent bind...");
 
         var parent = FindParentOf(Roots, node);
         nint folder = _desktop;
@@ -89,13 +95,20 @@ internal sealed class ShellTree : IDisposable
             var sf = Shell.OpenFolderByParsingName(parent.ParsingName);
             if (sf != 0) folder = sf;
         }
+        App.AppLog("tree: rightclick -> ShowContextMenu");
         Shell.ShowContextMenu(folder, node.Pidl, (nint)_hwnd.Value, ptScreen.X, ptScreen.Y);
+        App.AppLog("tree: rightclick done");
     }
 
     private void Expand(TreeNode node)
     {
+        App.AppLog($"tree: expand {node.Name}");
         var folder = Shell.OpenFolderByParsingName(node.ParsingName);
-        if (folder == 0) return;
+        if (folder == 0)
+        {
+            App.AppLog($"tree: expand {node.Name} FAIL bind");
+            return;
+        }
         try
         {
             node.Children.Clear();
@@ -112,6 +125,7 @@ internal sealed class ShellTree : IDisposable
             node.Expanded = true;
         }
         finally { Shell.ReleaseFolder(folder); }
+        App.AppLog($"tree: expanded {node.Name} -> {node.Children.Count} children");
     }
 
     private static TreeNode? FindParentOf(List<TreeNode> list, TreeNode target)

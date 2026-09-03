@@ -160,6 +160,7 @@ SYSTEMTIME
 TrackPopupMenu
 TPM_RETURNCMD
 GetCursorPos
+GetWindowRect
 ClientToScreen
 WM_RBUTTONUP
 WM_RBUTTONDOWN

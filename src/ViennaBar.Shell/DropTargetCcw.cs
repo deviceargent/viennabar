@@ -58,6 +58,7 @@ internal unsafe class DropTargetCcw : IDisposable
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     private static int QueryInterfaceImpl(ComObject* self, Guid* riid, void** ppv)
     {
+        Log("ccw: QI");
         Guid iidDropTarget = new(0x00000122, 0, 0, 0xC0, 0, 0, 0, 0, 0, 0, 0x46);
         Guid iidUnknown = new(0x00000000, 0, 0, 0xC0, 0, 0, 0, 0, 0, 0, 0x46);
         if (*riid == iidDropTarget || *riid == iidUnknown)
@@ -79,6 +80,7 @@ internal unsafe class DropTargetCcw : IDisposable
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     private static int DragEnterImpl(ComObject* self, void* dataObj, uint keyState, PointL pt, uint* effect)
     {
+        Log($"ccw: DragEnter (dataObj={(nint)dataObj:X})");
         return FromCom(self).OnDragEnter(dataObj, keyState, pt, effect);
     }
 
@@ -91,17 +93,25 @@ internal unsafe class DropTargetCcw : IDisposable
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     private static int DragLeaveImpl(ComObject* self)
     {
+        Log("ccw: DragLeave");
         return FromCom(self).OnDragLeave();
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     private static int DropImpl(ComObject* self, void* dataObj, uint keyState, PointL pt, uint* effect)
     {
+        Log($"ccw: Drop (dataObj={(nint)dataObj:X})");
         return FromCom(self).OnDrop(dataObj, keyState, pt, effect);
     }
 
     private static DropTargetCcw FromCom(ComObject* self) =>
         (DropTargetCcw)GCHandle.FromIntPtr((nint)self->Managed).Target!;
+
+    private static void Log(string s)
+    {
+        try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "viennabar-app.log"), $"{DateTime.Now:HH:mm:ss.fff} {s}\n"); }
+        catch { }
+    }
 
     // ---- lÃ³gica managed (override por el core) ----
     protected virtual int OnDragEnter(void* dataObj, uint keyState, PointL pt, uint* effect)

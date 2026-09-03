@@ -35,24 +35,34 @@ internal sealed class DropEngine : ViennaBar.ShellNative.DropTargetCcw, IDisposa
 
     protected override unsafe int OnDragEnter(void* dataObj, uint keyState, PointL pt, uint* effect)
     {
+        App.Instance?.SetDragActive(true);
+        App.Instance?.Invalidate();
         if (effect is not null) *effect = 1; // DROPEFFECT_COPY
         return 0;
     }
 
     protected override unsafe int OnDragOver(uint keyState, PointL pt, uint* effect)
     {
-        if (effect is not null) *effect = 1;
+        if (effect is not null) *effect = 1; // DROPEFFECT_COPY
         return 0;
     }
 
-    protected override int OnDragLeave() => 0;
+    protected override int OnDragLeave()
+    {
+        App.Instance?.SetDragActive(false);
+        return 0;
+    }
 
     protected override unsafe int OnDrop(void* dataObj, uint keyState, PointL pt, uint* effect)
     {
+        App.Instance?.SetDragActive(false);
         var paths = ViennaBar.ShellNative.ShellNative.PathsFromDataObject(dataObj);
         foreach (var p in paths) DropStack.Add(p);
         if (paths.Count > 0)
-            Console.WriteLine($"[drop] +{paths.Count} al stack (total {DropStack.Count})");
+        {
+            App.AppLog($"[drop] +{paths.Count} al stack (total {DropStack.Count}): {paths[0]}");
+            App.Instance?.Invalidate();
+        }
         if (effect is not null) *effect = 1;
         return 0;
     }

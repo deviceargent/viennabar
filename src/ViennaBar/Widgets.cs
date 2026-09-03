@@ -81,7 +81,54 @@ internal sealed class Widgets : IDisposable
         // lectura numérica
         by += 22;
         ctx.Text($"CPU {_cpuPct:0}%   RAM {_ramPct:0}%", AppText.Fmt, Skin.Muted, 12, by, w - 20, 14);
+
+        // ---- Drop Stack panel: zona de drop visible (el CCW acepta toda la
+        // ventana; este panel muestra el stack + estado del drag) ----
+        by += 24;
+        float panelY = by;
+        float panelH = h - panelY - 4;
+        if (panelH < 40) return;
+
+        // contenedor
+        ctx.FillRect(_dragOver ? Skin.Sel : Skin.Search, 4, panelY, w - 8, panelH);
+        ctx.Line(Skin.Divider, 4, panelY, w - 4, panelY);
+        ctx.Line(Skin.Divider, 4, panelY + panelH, w - 4, panelY + panelH);
+        ctx.Line(Skin.Divider, 4, panelY, 4, panelY + panelH);
+        ctx.Line(Skin.Divider, w - 4, panelY, w - 4, panelY + panelH);
+
+        // header
+        string header = _dragOver ? "suelta para apilar" : $"Stack ({_dropStack?.Count ?? 0})";
+        ctx.Text(header, AppText.FmtBig, _dragOver ? Skin.Text : Skin.Muted, 10, panelY + 4, w - 20, 16);
+
+        // items (max los que entren)
+        if (_dropStack is not null)
+        {
+            float iy = panelY + 22;
+            int n = Math.Min(_dropStack.Count, (int)((panelH - 26) / 16f));
+            int first = Math.Max(0, _dropStack.Count - n);   // ultimos N
+            for (int i = _dropStack.Count - 1; i >= first && iy < panelY + panelH - 16; i--)
+            {
+                var name = _dropStack[i];
+                int cut = name.LastIndexOf('\\');
+                if (cut >= 0) name = name[(cut + 1)..];
+                ctx.Text(name, AppText.Fmt, Skin.Text, 10, iy, w - 24, 14);
+                iy += 16;
+            }
+        }
     }
+
+    // wiring del drop (App lo conecta en MessageLoop)
+    internal void SetDropStack(List<string> stack) => _dropStack = stack;
+    internal void SetDragOver(bool over)
+    {
+        if (_dragOver != over)
+        {
+            _dragOver = over;
+            App.Instance?.Invalidate();
+        }
+    }
+    private List<string>? _dropStack;
+    private bool _dragOver;
 
     private static void DrawBar(RenderCtx ctx, float x, float y, float w, float h, double frac)
     {

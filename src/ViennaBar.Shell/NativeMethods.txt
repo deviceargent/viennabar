@@ -42,6 +42,7 @@ RevokeDragDrop
 OleInitialize
 CoCreateInstance
 CoInitialize
+CoInitializeEx
 CoTaskMemFree
 CoTaskMemAlloc
 CLSID_DragDropHelper
@@ -72,6 +73,7 @@ Next
 SHGetPathFromIDList
 CreatePopupMenu
 DestroyMenu
+GetMenuItemCount
 TrackPopupMenu
 TPM_RETURNCMD
 TPM_RIGHTBUTTON

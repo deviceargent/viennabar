@@ -24,6 +24,7 @@ internal sealed unsafe class App : IDisposable
     private HWND _hwnd;
     private bool _hidden = true;
     private bool _drawerOpen;
+    private bool _dragActive;   // drag OLE en curso: suspender auto-hide (WM_MOUSELEAVE espurio)
     private uint _dpi = 96;
 
     private readonly ShellTree _tree;
@@ -76,9 +77,23 @@ internal sealed unsafe class App : IDisposable
         }
     }
 
+    // drag OLE en curso (llamado desde DropEngine CCW): sin cross-thread —
+    // DragEnter/Over/Leave/Drop llegan en el hilo STA = hilo UI.
+    internal void SetDragActive(bool active)
+    {
+        _dragActive = active;
+        _widgets.SetDragOver(active);   // feedback visual del panel de drop
+        if (active && !_hidden)
+        {
+            _ = KillTimer(_hwnd, TimerHide);   // cancelar hide ya programado
+        }
+    }
+
     private int MessageLoop()
     {
         AppLog("ml: begin");
+        CrashDiag.Init();
+        AppLog("ml: crashdiag init");
         var hinst = GetModuleHandle(default(PCWSTR));
         AppLog("ml: hinst");
 
@@ -137,13 +152,18 @@ internal sealed unsafe class App : IDisposable
         _drawer.InitText(_renderer);
         // widgets: timer solo con la barra visible (Start/Stop en SetPos)
         _widgets.Start(_hwnd);
+        _widgets.SetDropStack(_drop.DropStack);   // panel Drop Stack en el tercio widgets
         AppLog("widgets started");
 
-        while (GetMessage(out var msg, default, 0, 0))
+        MSG msg = default;
+        int r;
+        while ((r = (int)GetMessage(out msg, default, 0, 0)) != 0)
         {
+            if (r == -1) { AppLog("ml: GetMessage -1 (error)"); break; }
             TranslateMessage(in msg);
             _ = DispatchMessage(in msg);
         }
+        AppLog($"ml: GetMessage exit (r={r}, last msg=0x{msg.message:X})");
         return 0;
     }
 
@@ -181,6 +201,7 @@ internal sealed unsafe class App : IDisposable
         };
         _ = SHAppBarMessage(ABM_QUERYPOS, ref abd);
         _ = SHAppBarMessage(ABM_SETPOS, ref abd);
+        AppLog($"setpos: abd.rc = L{abd.rc.left} T{abd.rc.top} R{abd.rc.right} B{abd.rc.bottom} (w={widthPx}, hidden={hidden})");
 
         _ = SetWindowPos(_hwnd, default, abd.rc.left, abd.rc.top,
             abd.rc.right - abd.rc.left, abd.rc.bottom - abd.rc.top,
@@ -199,6 +220,14 @@ internal sealed unsafe class App : IDisposable
     public void Invalidate() => _ = InvalidateRect(_hwnd, (RECT*)null, false);
 
     private bool Hidden => _hidden;
+
+    // cursor fisicamente dentro del rect de la ventana (anti LEAVE espurio)
+    private bool CursorInsideWindow()
+    {
+        _ = GetCursorPos(out var pt);
+        _ = GetWindowRect(_hwnd, out var r);
+        return pt.X >= r.left && pt.X < r.right && pt.Y >= r.top && pt.Y < r.bottom;
+    }
 
     internal static void AppLog(string s)
     {
@@ -270,7 +299,9 @@ internal sealed unsafe class App : IDisposable
                 return default;
 
             case WM_MOUSELEAVE:
-                if (!_hidden)
+                // durante un drag OLE el capture se va al drag helper y llegan
+                // WM_MOUSELEAVE espurios → NO ocultar la barra en mitad de un drop
+                if (!_hidden && !_dragActive)
                 {
                     _ = SetTimer(hwnd, TimerHide, HideDelayMs, null);
                 }
@@ -287,7 +318,12 @@ internal sealed unsafe class App : IDisposable
 
                     case TimerHide:
                         _ = KillTimer(hwnd, TimerHide);
-                        if (!_hidden) SetPos(SliverPx, hidden: true);
+                        // el LEAVE puede haber sido espurio (drag OLE / capture):
+                        // solo ocultar si el cursor salio de verdad
+                        if (!_hidden && !CursorInsideWindow())
+                        {
+                            SetPos(SliverPx, hidden: true);
+                        }
                         break;
 
                     case 3: // widgets tick (solo con barra visible)
@@ -297,6 +333,7 @@ internal sealed unsafe class App : IDisposable
                 return default;
 
             case WM_LBUTTONUP:
+                AppLog($"click L at {GET_X_LPARAM(lparam)},{GET_Y_LPARAM(lparam)} (widgetsH={WidgetsH}, treeH={TreeH})");
                 OnClick(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
                 return default;
 
@@ -312,6 +349,7 @@ internal sealed unsafe class App : IDisposable
             {
                 int rx = GET_X_LPARAM(lparam);
                 int ry = GET_Y_LPARAM(lparam);
+                AppLog($"click R at {rx},{ry} (widgetsH={WidgetsH})");
                 if (ry >= WidgetsH && ry < WidgetsH + TreeH)
                     _tree.OnRightClick(rx, ry - WidgetsH, FullWidthPx, TreeH);
                 return default;
@@ -328,6 +366,12 @@ internal sealed unsafe class App : IDisposable
                 return default;
 
             case WM_APP:
+                return default;
+
+            case WM_APP + 2:
+                // hot-reload skin: recrea brushes con tokens nuevos y repinta
+                _renderer.ReloadBrushes(_hwnd, 0, 0);
+                Invalidate();
                 return default;
 
             case WM_DPICHANGED:

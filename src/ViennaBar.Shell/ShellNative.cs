@@ -180,7 +180,14 @@ internal static unsafe class ShellNative
             parent->GetUIObjectOf(default, 1, &child, in iidMenu, out var raw);
             return (IContextMenu*)raw;
         }
-        catch { return null; }
+        catch (Exception ex) { DebugLog($"GetContextMenu FAIL: {ex.Message}"); return null; }
+    }
+
+    // debug-log del shell (repro 0xC0000005 F2.1b)
+    internal static void DebugLog(string s)
+    {
+        try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "viennabar-app.log"), $"{DateTime.Now:HH:mm:ss.fff} [shell] {s}\n"); }
+        catch { }
     }
 
     // ---------- launch (IContextMenu canÃ³nico â€” lecciones F1) ----------
@@ -224,13 +231,15 @@ internal static unsafe class ShellNative
         return p;
     }
 
-    // ---------- menÃº contextual interactivo ----------
+    // ---------- menú contextual interactivo ----------
     public static void ShowContextMenu(IShellFolder* parentFolder, byte[] childPidl, HWND hwnd, int screenX, int screenY)
     {
         var child = RestorePidl(childPidl);
         try
         {
+            DebugLog($"ctx: begin (pidl {childPidl.Length}B, screen {screenX},{screenY})");
             var menu = GetContextMenu(parentFolder, child);
+            DebugLog($"ctx: menu ptr={(nint)menu != 0}");
             if (menu is null) return;
             try
             {
@@ -238,9 +247,11 @@ internal static unsafe class ShellNative
                 try
                 {
                     menu->QueryContextMenu(hmenu, 0, 1, 0x7FFF, 0);
+                    DebugLog("ctx: QueryContextMenu OK, TrackPopupMenu...");
                     int cmd = TrackPopupMenu(hmenu,
                         TRACK_POPUP_MENU_FLAGS.TPM_RETURNCMD | TRACK_POPUP_MENU_FLAGS.TPM_RIGHTBUTTON,
                         screenX, screenY, 0, hwnd, null);
+                    DebugLog($"ctx: TrackPopupMenu returned cmd={cmd}");
                     if (cmd <= 0) return;
                     var ici = new CMINVOKECOMMANDINFO
                     {
@@ -249,6 +260,7 @@ internal static unsafe class ShellNative
                         nShow = 5,
                     };
                     menu->InvokeCommand(in ici);
+                    DebugLog("ctx: InvokeCommand returned");
                 }
                 finally { _ = DestroyMenu(hmenu); }
             }
@@ -311,6 +323,21 @@ internal static unsafe class ShellNative
     public static void ShowContextMenu(nint folderHandle, byte[] childPidl, nint hwnd, int screenX, int screenY) =>
         ShowContextMenu((IShellFolder*)folderHandle, childPidl, (HWND)hwnd, screenX, screenY);
 
+    public static string DebugTestQueryContextMenu(nint folderHandle, byte[] childPidl) =>
+        DebugTestQueryContextMenu((IShellFolder*)folderHandle, childPidl);
+
+    // ---- bisect del hang F2.1b: ingredientes de la app faltantes en consola ----
+    public static void InitSta()
+    {
+        _ = CoInitializeEx(default, Windows.Win32.System.Com.COINIT.COINIT_APARTMENTTHREADED);
+    }
+
+    public static void InitOleStaWithWindow()
+    {
+        _ = CoInitializeEx(default, Windows.Win32.System.Com.COINIT.COINIT_APARTMENTTHREADED);
+        _ = OleInitialize();
+    }
+
     public static void ReleaseFolder(nint folderHandle)
     {
         if (folderHandle != 0) _ = ((IShellFolder*)folderHandle)->Release();
@@ -344,6 +371,31 @@ internal static unsafe class ShellNative
     }
 
     // =============== drop: parse CF_HDROP de un IDataObject* crudo ===============
+
+    // test AOT del paso QueryContextMenu aislado (bisect del hang F2.1b):
+    // GetUIObjectOf(IContextMenu) + QueryContextMenu + DestroyMenu. Sin Track.
+    public static string DebugTestQueryContextMenu(IShellFolder* parentFolder, byte[] childPidl)
+    {
+        var child = RestorePidl(childPidl);
+        try
+        {
+            var menu = GetContextMenu(parentFolder, child);
+            if (menu is null) return "menu null";
+            try
+            {
+                var hmenu = CreatePopupMenu();
+                try
+                {
+                    menu->QueryContextMenu(hmenu, 0, 1, 0x7FFF, 0);
+                    int n = GetMenuItemCount(hmenu);
+                    return $"OK: {n} items";
+                }
+                finally { _ = DestroyMenu(hmenu); }
+            }
+            finally { _ = menu->Release(); }
+        }
+        finally { CoTaskMemFree(child); }
+    }
     // Devuelve los paths del CF_HDROP (o lista vacÃ­a). El core lo llama desde
     // el CCW IDropTarget con el void* que le entrega OLE.
 

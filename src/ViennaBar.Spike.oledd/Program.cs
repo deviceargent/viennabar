@@ -122,8 +122,10 @@ internal static unsafe class Program
     // drag-out: IDataObject del shell para un archivo del Desktop + DoDragDrop
     private static void StartDragOut()
     {
+        Log("dragout: begin");
         var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         var file = Directory.GetFiles(desktop).FirstOrDefault();
+        Log($"dragout: file={file ?? "NULL"}");
         if (file is null)
         {
             _status = "drag-out: sin archivos en Desktop";
@@ -132,6 +134,7 @@ internal static unsafe class Program
         }
 
         HRESULT hr = SHGetDesktopFolder(out var desktopFolder);
+        Log($"dragout: SHGetDesktopFolder hr=0x{(int)hr:X}");
         if (hr.Failed) return;
 
         ITEMIDLIST* pidl = null;
@@ -141,6 +144,7 @@ internal static unsafe class Program
             try { desktopFolder.ParseDisplayName(default, default, p, null, &pidl, ref attr); }
             catch { pidl = null; }
         }
+        Log($"dragout: pidl={(nint)pidl:X}");
         if (pidl is null) return;
 
         IDataObject? dataObj = null;
@@ -150,6 +154,7 @@ internal static unsafe class Program
             ITEMIDLIST* child = ILFindLastID(pidl);
             desktopFolder.GetUIObjectOf(default, 1, &child, &iidData, null, out var obj);
             dataObj = obj as IDataObject;
+            Log($"dragout: dataObj={(dataObj is not null ? "OK" : "FAIL")}");
         }
         finally { ILFree(pidl); }
 
@@ -164,11 +169,19 @@ internal static unsafe class Program
         var ctDataObj = (System.Runtime.InteropServices.ComTypes.IDataObject)dataObj;
 
         DROPEFFECT effect = default;
+        Log("dragout: DoDragDrop enter");
         hr = DoDragDrop(ctDataObj, new DropSourceInterop(),
             DROPEFFECT.DROPEFFECT_COPY | DROPEFFECT.DROPEFFECT_MOVE | DROPEFFECT.DROPEFFECT_LINK,
             out effect);
+        Log($"dragout: DoDragDrop hr=0x{(int)hr:X} effect={effect}");
         _status = $"DoDragDrop hr=0x{(int)hr:X} effect={effect}";
         UpdateText();
+    }
+
+    private static void Log(string s)
+    {
+        try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-spike.log"), $"{DateTime.Now:HH:mm:ss.fff} {s}\n"); }
+        catch { }
     }
 
     private static ITEMIDLIST* ILFindLastID(ITEMIDLIST* pidl)
