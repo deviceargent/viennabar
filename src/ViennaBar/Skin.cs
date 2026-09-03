@@ -38,23 +38,32 @@ internal sealed class Skin : IDisposable
 
     public static Skin LoadDefault()
     {
-        Current = new Skin();
-        Current.Init();
+        Current = LoadFromPath(SkinPath);
+        Current.Watch();
         return Current;
+    }
+
+    // parseo sin watcher: testeable headless (los tests usan un path temporal
+    // y no tocan el skin.json real del usuario)
+    internal static Skin LoadFromPath(string path)
+    {
+        var skin = new Skin();
+        skin.LoadFromDisk(path);
+        return skin;
     }
 
     private void Init()
     {
-        LoadFromDisk();
+        LoadFromDisk(SkinPath);
         Watch();
     }
 
-    private void LoadFromDisk()
+    private void LoadFromDisk(string path)
     {
         try
         {
-            if (!File.Exists(SkinPath)) return;
-            using var doc = JsonDocument.Parse(File.ReadAllText(SkinPath));
+            if (!File.Exists(path)) return;
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
             var root = doc.RootElement;
             _bg = ReadColor(root, "background", _bg);
             _text = ReadColor(root, "text", _text);
@@ -98,7 +107,7 @@ internal sealed class Skin : IDisposable
             _watcher.Changed += (_, _) =>
             {
                 Thread.Sleep(150);            // el editor escribe en varios pasos
-                LoadFromDisk();
+                LoadFromDisk(SkinPath);
                 // refresco de brushes + repaint desde el hilo UI
                 App.Instance?.ReloadSkin(this);
             };

@@ -55,7 +55,7 @@ internal unsafe class DropSourceCcw : IDisposable
             return 0;
         }
         *ppv = null;
-        return -2147467263; // E_NOINTERFACE
+        return -2147467262; // E_NOINTERFACE
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]

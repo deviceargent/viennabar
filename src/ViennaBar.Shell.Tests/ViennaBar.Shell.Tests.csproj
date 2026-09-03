@@ -10,5 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\ViennaBar.Shell\ViennaBar.Shell.csproj" />
+    <ProjectReference Include="..\ViennaBar\ViennaBar.csproj" />
   </ItemGroup>
 </Project>

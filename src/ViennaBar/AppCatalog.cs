@@ -66,10 +66,18 @@ internal sealed unsafe class AppCatalog : IDisposable
 
     private void LoadCache()
     {
+        var list = ReadCache(_cachePath);
+        if (list.Count > 0) _apps = list;
+    }
+
+    // formato binario del cache, estático para test headless (round-trip)
+    internal static List<AppEntry> ReadCache(string path)
+    {
+        var empty = new List<AppEntry>();
         try
         {
-            if (!File.Exists(_cachePath)) return;
-            using var br = new BinaryReader(File.OpenRead(_cachePath));
+            if (!File.Exists(path)) return empty;
+            using var br = new BinaryReader(File.OpenRead(path));
             int n = br.ReadInt32();
             var list = new List<AppEntry>(n);
             for (int i = 0; i < n; i++)
@@ -80,18 +88,20 @@ internal sealed unsafe class AppCatalog : IDisposable
                 byte[] pidl = len > 0 ? br.ReadBytes(len) : Array.Empty<byte>();
                 list.Add(new AppEntry(name, parsing, pidl));
             }
-            if (list.Count > 0) _apps = list;
+            return list;
         }
-        catch { /* cache corrupta: se regenera */ }
+        catch { return empty; }   // cache corrupta: se regenera
     }
 
-    private void SaveCache()
+    private void SaveCache() => WriteCache(_cachePath, _apps);
+
+    internal static void WriteCache(string path, List<AppEntry> apps)
     {
         try
         {
-            using var bw = new BinaryWriter(File.Create(_cachePath));
-            bw.Write(_apps.Count);
-            foreach (var a in _apps)
+            using var bw = new BinaryWriter(File.Create(path));
+            bw.Write(apps.Count);
+            foreach (var a in apps)
             {
                 bw.Write(a.Name);
                 bw.Write(a.ParsingName);

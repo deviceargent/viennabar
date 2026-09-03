@@ -21,6 +21,9 @@
     <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.106" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="ViennaBar.Shell.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\ViennaBar.Gfx\ViennaBar.Gfx.csproj" />
     <ProjectReference Include="..\ViennaBar.Shell\ViennaBar.Shell.csproj" />
   </ItemGroup>
