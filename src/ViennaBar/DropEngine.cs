@@ -57,6 +57,22 @@ internal sealed class DropEngine : ViennaBar.ShellNative.DropTargetCcw, IDisposa
     {
         App.Instance?.SetDragActive(false);
         var paths = ViennaBar.ShellNative.ShellNative.PathsFromDataObject(dataObj);
+        if (paths.Count == 0)
+        {
+            // sin CF_HDROP: probar archivos virtuales (imagenes web) con
+            // snapshot a temp — el stack guarda archivos REALES re-dropeables
+            var virtuals = ViennaBar.ShellNative.ShellNative.ReadVirtualFiles(dataObj);
+            if (virtuals is not null)
+            {
+                foreach (var vf in virtuals)
+                {
+                    var snap = ViennaBar.ShellNative.ShellNative.SnapshotVirtualFile(vf.FileName, vf.Content);
+                    if (snap is not null) paths.Add(snap);
+                }
+                if (paths.Count > 0)
+                    App.AppLog($"[drop] +{paths.Count} virtual snapshot (total {DropStack.Count + paths.Count})");
+            }
+        }
         // COPY optimista: el deferral (menu Mover/Copiar/Apilar) ejecuta la
         // operacion real despues; si el usuario apila o cancela, el origen
         // conserva los archivos — consistente en todos los casos.

@@ -19,6 +19,7 @@ internal sealed unsafe class App : IDisposable
     private const int SliverPx = 2;
     private const nuint TimerReveal = 1;
     private const nuint TimerHide = 2;
+    private const nuint TimerDrawer = 4;   // auto-close del drawer (4s idle)
     private const uint RevealDelayMs = 80;
     private const uint HideDelayMs = 400;
 
@@ -138,7 +139,7 @@ internal sealed unsafe class App : IDisposable
     internal void SetDragActive(bool active)
     {
         _dragActive = active;
-        _widgets.SetDragOver(active);   // feedback visual del panel de drop
+        _drawer.SetDragOver(active);   // feedback visual de la zona de drop
         if (active)
         {
             if (_hidden) SetPos(FullWidthPx, hidden: false);   // revelar ante drag externo
@@ -217,7 +218,7 @@ internal sealed unsafe class App : IDisposable
         _drawer.InitText(_renderer);
         // widgets: timer solo con la barra visible (Start/Stop en SetPos)
         _widgets.Start(_hwnd);
-        _widgets.SetDropStack(_drop.DropStack);   // panel Drop Stack en el tercio widgets
+        _drawer.SetDropStack(_drop.DropStack);   // superficie drop en el drawer colapsado
         AppLog("widgets started");
 
         MSG msg = default;
@@ -389,12 +390,19 @@ internal sealed unsafe class App : IDisposable
             if (y >= ClientH - 40 || !_drawerOpen)
             {
                 _drawerOpen = !_drawerOpen;
-                if (_drawerOpen) _drawer.FocusSearch();
+                if (_drawerOpen)
+                {
+                    _drawer.FocusSearch();
+                    ArmDrawerTimer();
+                }
+                else _ = KillTimer(_hwnd, TimerDrawer);
                 Invalidate();
             }
             else
             {
                 _drawer.OnClick(x, y - WidgetsH - TreeH, DrawerH);
+                if (_drawer.ConsumeDismiss()) CloseDrawer();
+                else { ArmDrawerTimer(); Invalidate(); }
             }
         }
         else if (y >= WidgetsH)
@@ -409,13 +417,27 @@ internal sealed unsafe class App : IDisposable
         }
     }
 
+    private void CloseDrawer()
+    {
+        _drawerOpen = false;
+        _ = KillTimer(_hwnd, TimerDrawer);
+        Invalidate();
+    }
+
+    private void ArmDrawerTimer()
+    {
+        _ = KillTimer(_hwnd, TimerDrawer);
+        _ = SetTimer(_hwnd, TimerDrawer, 4000, null);
+    }
+
     // teclado → drawer (busqueda + navegacion). Llega porque al hacer click la
     // ventana se activa y gana foco.
     private void OnKey(uint msg, WPARAM wparam)
     {
         if (!_drawerOpen) return;
         bool handled = _drawer.OnKey(msg, wparam);
-        if (handled) Invalidate();
+        if (_drawer.ConsumeDismiss()) CloseDrawer();
+        else if (handled) { ArmDrawerTimer(); Invalidate(); }
     }
 
     private LRESULT WndProc(HWND hwnd, uint msg, WPARAM wparam, LPARAM lparam)
@@ -465,6 +487,15 @@ internal sealed unsafe class App : IDisposable
                     case 3: // widgets tick (solo con barra visible)
                         _widgets.OnTimer(hwnd, 3);
                         break;
+
+                    case TimerDrawer: // auto-close del drawer (idle)
+                        _ = KillTimer(hwnd, TimerDrawer);
+                        if (_drawerOpen)
+                        {
+                            _drawerOpen = false;
+                            Invalidate();
+                        }
+                        break;
                 }
                 return default;
 
@@ -473,27 +504,27 @@ internal sealed unsafe class App : IDisposable
                 AppLog($"click L at {GET_X_LPARAM(lparam)},{GET_Y_LPARAM(lparam)} (widgetsH={WidgetsH}, treeH={TreeH})");
                 if (_pressIdx >= 0)
                 {
-                    // click sin arrastrar sobre item del stack: cancelar press
+                    // press de drag-out sin movimiento: no-op (no togglear nada)
                     ReleaseCapture();
                     _pressIdx = -1;
-                    _widgets.SetPressedItem(-1);
+                    _drawer.SetPressedItem(-1);
                 }
-                OnClick(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+                else OnClick(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
                 return default;
             }
 
             case WM_LBUTTONDOWN:
             {
                 int px = GET_X_LPARAM(lparam), py = GET_Y_LPARAM(lparam);
-                if (py < WidgetsH)
+                if (py >= WidgetsH + TreeH && !_drawerOpen)
                 {
-                    int idx = _widgets.StackHitTest(px, py);
+                    // drawer colapsado: press sobre thumb = potencial drag-out
+                    int idx = _drawer.ThumbHitTest(px, py - WidgetsH - TreeH);
                     if (idx >= 0)
                     {
-                        // begin drag-out potencial del item idx del stack
                         _pressIdx = idx;
                         _pressPt = (px, py);
-                        _widgets.SetPressedItem(idx);
+                        _drawer.SetPressedItem(idx);
                         _ = SetCapture(hwnd);
                     }
                 }
@@ -510,7 +541,7 @@ internal sealed unsafe class App : IDisposable
                         var idx = _pressIdx;
                         ReleaseCapture();
                         _pressIdx = -1;
-                        _widgets.SetPressedItem(-1);
+                        _drawer.SetPressedItem(-1);
                         StartDragOut(idx);
                     }
                 }
@@ -561,7 +592,7 @@ internal sealed unsafe class App : IDisposable
             case WM_CAPTURECHANGED:
                 // perdida de capture ajena (p.ej. ventana popup): cancelar press
                 _pressIdx = -1;
-                _widgets.SetPressedItem(-1);
+                _drawer.SetPressedItem(-1);
                 return default;
 
             case WM_CHAR:

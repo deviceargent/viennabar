@@ -104,6 +104,9 @@ internal sealed unsafe class Renderer : IDisposable
         _rt = (ID2D1HwndRenderTarget*)rtRaw;
         _w = width; _h = height;
 
+        // los bitmaps mueren con el RT: purgar thumbs (se recargan lazy)
+        PurgeThumbs();
+
         // recrear brushes (viven del RT)
         foreach (var p in _brushes.Values)
         {
@@ -183,6 +186,68 @@ internal sealed unsafe class Renderer : IDisposable
         AsRt(_rt)->FillEllipse(&e, brush);
     }
 
+    internal void _rt_DrawBitmap(ID2D1Bitmap* bmp, D2D_RECT_F* dst)
+    {
+        AsRt(_rt)->DrawBitmap(bmp, dst, 1f,
+            D2D1_BITMAP_INTERPOLATION_MODE.D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, null);
+    }
+
+    // sube pixeles BGRA premultiplicados a un ID2D1Bitmap del RT actual.
+    // 0 = fail. El caller libera con ReleaseBitmap (los bitmaps mueren con el RT).
+    internal nint CreateBitmapFromPixels(int w, int h, nint pixels, uint pitch)
+    {
+        if (_rt is null || pixels == 0 || w <= 0 || h <= 0) return 0;
+        var props = new D2D1_BITMAP_PROPERTIES
+        {
+            pixelFormat = new D2D1_PIXEL_FORMAT
+            {
+                format = global::Windows.Win32.Graphics.Dxgi.Common.DXGI_FORMAT.DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode = D2D1_ALPHA_MODE.D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
+            dpiX = 96f,
+            dpiY = 96f,
+        };
+        var size = new Windows.Win32.Graphics.Direct2D.Common.D2D_SIZE_U { width = (uint)w, height = (uint)h };
+        ID2D1Bitmap* bmp = null;
+        try
+        {
+            AsRt(_rt)->CreateBitmap(size, (void*)pixels, pitch, &props, &bmp);
+        }
+        catch { bmp = null; }
+        return (nint)bmp;
+    }
+
+    internal void ReleaseBitmap(nint bmp)
+    {
+        if (bmp != 0) _ = ((ID2D1Bitmap*)bmp)->Release();
+    }
+
+    // ---- cache de thumbnails por path (los bitmaps viven del RT) ----
+    private readonly Dictionary<string, nint> _thumbs = new();
+
+    // bitmap del thumb (o 0): resuelve via Shell una vez y cachea.
+    // size fijo 64: SIIG escala, D2D re-escala al dibujar.
+    internal nint GetThumb(string path)
+    {
+        if (_thumbs.TryGetValue(path, out var hit)) return hit;
+        if (_thumbs.Count > 40) PurgeThumbs();
+        nint bmp = 0;
+        var px = ViennaBar.ShellNative.ShellNative.GetThumbnailPixels(path, 64);
+        if (px is not null)
+        {
+            try { bmp = CreateBitmapFromPixels(px.Value.w, px.Value.h, px.Value.buf, (uint)(px.Value.w * 4)); }
+            finally { ViennaBar.ShellNative.ShellNative.FreeThumbnail(px.Value.buf); }
+        }
+        _thumbs[path] = bmp;   // cachea tambien el 0 (no reintentar por paint)
+        return bmp;
+    }
+
+    private void PurgeThumbs()
+    {
+        foreach (var p in _thumbs.Values) ReleaseBitmap(p);
+        _thumbs.Clear();
+    }
+
     public TextFormatHandle Text9Handle => new((nint)_text9);
     public TextFormatHandle Text11bHandle => new((nint)_text11b);
     public TextFormatHandle TextBigHandle => new((nint)_text11b); // reloj: 11b bold
@@ -198,6 +263,7 @@ internal sealed unsafe class Renderer : IDisposable
 
     public void Dispose()
     {
+        PurgeThumbs();
         foreach (var p in _brushes.Values) _ = ((ID2D1SolidColorBrush*)p)->Release();
         _brushes.Clear();
         if (_text9 is not null) { _ = ((IDWriteTextFormat*)_text9)->Release(); _text9 = null; }
@@ -251,6 +317,15 @@ internal unsafe struct RenderCtx
         var b = _owner.BrushPtr(BrushName(argb));
         if (b is not null) _owner._rt_FillEllipse(cx, cy, rx, ry, b);
     }
+
+    public void DrawBitmap(nint bmp, float x, float y, float w, float h)
+    {
+        if (bmp == 0) return;
+        var r = new D2D_RECT_F { left = x, top = y, right = x + w, bottom = y + h };
+        unsafe { _owner._rt_DrawBitmap((ID2D1Bitmap*)bmp, &r); }
+    }
+
+    public nint GetThumb(string path) => _owner.GetThumb(path);
 
     private static D2D1_COLOR_F ArgbToColorF(int argb) => new()
     {

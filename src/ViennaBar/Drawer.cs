@@ -73,9 +73,10 @@ internal sealed class Drawer
         var results = CurrentResults();
         switch (vk)
         {
-            case 0x1B: // VK_ESCAPE: limpia bÃºsqueda
+            case 0x1B: // VK_ESCAPE: limpia búsqueda; si ya está vacía, cierra el drawer
                 if (_search.Length > 0) { _search = ""; _selIdx = 0; _topRow = 0; _resultsCache = null; return true; }
-                return false;
+                _dismissRequested = true;
+                return true;
             case 0x26: // VK_UP
                 if (_selIdx > 0) { _selIdx--; ClampScroll(results.Count); return true; }
                 return false;
@@ -165,6 +166,7 @@ internal sealed class Drawer
             {
                 Shell.LaunchByPidl(appsFolder, entry.Pidl);
                 Console.WriteLine($"[drawer] launch OK: {entry.Name}");
+                _dismissRequested = true;   // al invocar se cierra el menu
             }
             finally { Shell.ReleaseFolder(appsFolder); }
         }
@@ -179,27 +181,122 @@ internal sealed class Drawer
     {
         // halo exterior (glass celeste)
         ctx.FillEllipse(Skin.SheenTop, cx, cy, 11f, 11f);
-        // nÃºcleo azul
+        // núcleo azul
         ctx.FillEllipse(Skin.Btn, cx, cy, 8.5f, 8.5f);
         // highlight superior (reflejo)
         ctx.FillEllipse(Skin.White, cx - 2.5f, cy - 3.5f, 3.2f, 2.4f);
     }
 
+    // ---- superficie de drop (drawer colapsado): grid de thumbnails ----
+    // El CCW acepta toda la ventana; esta zona visible muestra el stack con
+    // thumbs (o solo nombres si el thumb falla). Click-arrastrar = drag-out.
+    private const float ThumbPx = 56f;
+    private const float CellH = 76f;
+    private const int DropCols = 3;
+
+    private List<string>? _dropStack;
+    private bool _dragOver;
+    private int _pressedItem = -1;
+    private float _dropGridY;      // coords drawer-local, del ultimo paint
+    private float _dropCellW;
+    private int _dropCells;        // celdas visibles en el ultimo paint
+
+    internal void SetDropStack(List<string> stack) => _dropStack = stack;
+
+    internal void SetDragOver(bool over)
+    {
+        if (_dragOver != over)
+        {
+            _dragOver = over;
+            App.Instance?.Invalidate();
+        }
+    }
+
+    internal void SetPressedItem(int index)
+    {
+        if (_pressedItem != index)
+        {
+            _pressedItem = index;
+            App.Instance?.Invalidate();
+        }
+    }
+
+    private void RenderDropZone(RenderCtx ctx, int x, int y, int w, int h)
+    {
+        if (h < 60) return;
+        _dropCellW = (w - 8) / (float)DropCols;
+        int count = _dropStack?.Count ?? 0;
+        string header = _dragOver ? "suelta para apilar"
+            : count > 0 ? $"Drop ({count})" : "Arrastra archivos";
+        ctx.Text(header, FBig, _dragOver ? Skin.Text : Skin.Muted, x + 10, y + 4, w - 20, 18);
+
+        float gy = y + 24;
+        _dropGridY = gy;
+        int rows = Math.Max(0, (int)((h - 28) / CellH));
+        int n = Math.Min(count, rows * DropCols);
+        _dropCells = n;
+        if (_dropStack is null) return;
+        for (int p = 0; p < n; p++)
+        {
+            int i = count - 1 - p;   // mas nuevos arriba
+            int row = p / DropCols, col = p % DropCols;
+            float cx = x + 4 + col * _dropCellW + _dropCellW / 2;
+            float cy = gy + row * CellH;
+            if (i == _pressedItem)
+                ctx.FillRect(Skin.Sel, x + 4 + col * _dropCellW + 2, cy - 2, _dropCellW - 4, CellH - 2);
+            nint bmp = ctx.GetThumb(_dropStack[i]);
+            if (bmp != 0) ctx.DrawBitmap(bmp, cx - ThumbPx / 2, cy, ThumbPx, ThumbPx);
+            else ctx.FillRect(Skin.Search, cx - ThumbPx / 2, cy, ThumbPx, ThumbPx);
+            var name = _dropStack[i];
+            int cut = name.LastIndexOf('\\');
+            if (cut >= 0) name = name[(cut + 1)..];
+            if (name.Length > 14) name = name[..13] + "…";
+            ctx.Text(name, F, Skin.Text, cx - _dropCellW / 2 + 4, cy + ThumbPx + 2, _dropCellW - 8, 14);
+        }
+    }
+
+    // celda bajo el punto (coords drawer-local) -> index en el stack, o -1
+    internal int ThumbHitTest(int x, int y)
+    {
+        if (_dropStack is null || _dropStack.Count == 0 || _dropCells <= 0) return -1;
+        if (y < _dropGridY) return -1;
+        int col = (int)((x - 4) / _dropCellW);
+        int row = (int)((y - _dropGridY) / CellH);
+        if (col < 0 || col >= DropCols || row < 0) return -1;
+        int p = row * DropCols + col;
+        if (p < 0 || p >= _dropCells) return -1;
+        return _dropStack.Count - 1 - p;
+    }
+
+    // dismiss del drawer: la app lo cierra al lanzar o con ESC (ver App)
+    private bool _dismissRequested;
+
+    internal bool ConsumeDismiss()
+    {
+        if (!_dismissRequested) return false;
+        _dismissRequested = false;
+        return true;
+    }
+
     public void Render(RenderCtx ctx, int x, int y, int w, int h, bool open)
     {
-        // botÃ³n Inicio: orbe Vienna (cÃ­rculo azul con highlight) + texto
+        // botón Inicio: orbe Vienna (círculo azul con highlight) + texto
         float by = y + h - StartBtnH - 4;
         ctx.FillRect(Skin.Btn, 4, by, w - 8, StartBtnH);
 
-        // orbe: cÃ­rculo blanco semitransparente con nÃºcleo (sin ellipses API en
-        // RenderCtx aÃºn â†’ aproximaciÃ³n con 3 rects concÃ©ntricos suaves)
+        // orbe: círculo blanco semitransparente con núcleo (sin ellipses API en
+        // RenderCtx aún → aproximación con 3 rects concéntricos suaves)
         float cx = 16f, cy = by + StartBtnH / 2f;
         DrawOrb(ctx, cx, cy);
 
         // texto "Inicio" desplazado por el orbe
         ctx.Text("Inicio", FBig, Skin.White, 34, by + (StartBtnH - 18) / 2);
 
-        if (!open) return;
+        if (!open)
+        {
+            RenderDropZone(ctx, x, y, w, (int)(by - y - 4));
+            return;
+        }
 
         float dy = y + 4;
         // search box con el texto real + caret

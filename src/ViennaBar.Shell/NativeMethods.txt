@@ -94,3 +94,4 @@ GlobalUnlock
 GlobalFree
 DROPFILES
 IDropSource
+GlobalSize

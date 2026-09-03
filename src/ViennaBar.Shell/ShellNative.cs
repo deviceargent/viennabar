@@ -597,6 +597,307 @@ internal static unsafe class ShellNative
         finally { CoTaskMemFree(child); }
     }
 
+    // =============== archivos virtuales (imagenes web: FileGroupDescriptorW + FileContents) ===============
+    // Los navegadores no dan CF_HDROP: dan descriptor (nombres) + stream por
+    // indice. Se parsea el descriptor (HGLOBAL) y cada contenido (ISTREAM,
+    // fallback HGLOBAL) con lecturas por chunks (sin confiar en tamanos).
+    public sealed record VirtualFile(string FileName, byte[] Content);
+
+    private const int FileDescriptorSize = 592;   // sizeof(FILEDESCRIPTORW, layout shlobj.h)
+    private const int FileNameOffset = 72;        // offset de cFileName[260]
+    private const int MaxVirtualBytes = 100 * 1024 * 1024;
+
+    public static List<VirtualFile>? ReadVirtualFiles(void* dataObjUnknown)
+    {
+        try
+        {
+            var unk = (Windows.Win32.System.Com.IUnknown*)dataObjUnknown;
+            Guid iidData = Windows.Win32.System.Com.IDataObject.IID_Guid;
+            void* pv = null;
+            if (unk->QueryInterface(&iidData, &pv) != 0) return null;
+            var data = (Windows.Win32.System.Com.IDataObject*)pv;
+            try
+            {
+                uint cfDesc = RegisterClipboardFormat("FileGroupDescriptorW");
+                if (cfDesc == 0) return null;
+                if (!HasFormat(data, cfDesc)) return null;
+                var names = ParseDescriptors(data, cfDesc);
+                if (names.Count == 0) return null;
+                uint cfContents = RegisterClipboardFormat("FileContents");
+                if (cfContents == 0) return null;
+                var results = new List<VirtualFile>(names.Count);
+                for (int i = 0; i < names.Count; i++)
+                {
+                    var bytes = ReadContents(data, cfContents, i);
+                    if (bytes is not null && bytes.Length > 0)
+                        results.Add(new VirtualFile(SanitizeFileName(names[i]), bytes));
+                }
+                return results.Count > 0 ? results : null;
+            }
+            finally { _ = data->Release(); }
+        }
+        catch { return null; }
+    }
+
+    private static bool HasFormat(Windows.Win32.System.Com.IDataObject* data, uint cf)
+    {
+        var fmt = new FORMATETC { cfFormat = (ushort)cf, dwAspect = 1, lindex = -1, tymed = (uint)TYMED.TYMED_HGLOBAL };
+        try { data->QueryGetData(fmt); return true; }
+        catch { return false; }
+    }
+
+    // parseo del descriptor sobre memoria ya lockeada (testeable con buffer fabricado)
+    internal static List<string> ParseDescriptorNames(void* mem)
+    {
+        var names = new List<string>();
+        uint count = *(uint*)mem;
+        if (count == 0 || count > 64) return names;
+        char* base_ = (char*)((byte*)mem + 4);
+        for (uint i = 0; i < count; i++)
+        {
+            char* name = (char*)((byte*)base_ + i * FileDescriptorSize + FileNameOffset);
+            int len = 0;
+            while (len < 260 && name[len] != '\0') len++;
+            names.Add(new string(name, 0, len));
+        }
+        return names;
+    }
+
+    private static List<string> ParseDescriptors(Windows.Win32.System.Com.IDataObject* data, uint cf)
+    {
+        var names = new List<string>();
+        var fmt = new FORMATETC { cfFormat = (ushort)cf, dwAspect = 1, lindex = -1, tymed = (uint)TYMED.TYMED_HGLOBAL };
+        var medium = default(STGMEDIUM);
+        try { data->GetData(in fmt, out medium); }
+        catch { return names; }
+        try
+        {
+            if (medium.tymed != TYMED.TYMED_HGLOBAL || medium.u.hGlobal.Value is null) return names;
+            void* p = GlobalLock(medium.u.hGlobal);
+            if (p is null) return names;
+            try { return ParseDescriptorNames(p); }
+            finally { _ = GlobalUnlock(medium.u.hGlobal); }
+        }
+        finally { ReleaseStgMedium(ref medium); }
+    }
+
+    private static byte[]? ReadContents(Windows.Win32.System.Com.IDataObject* data, uint cf, int index)
+    {
+        // ISTREAM primero (navegadores), HGLOBAL despues. IStream por vtable
+        // cruda slot 3 (sin depender del shape generado).
+        foreach (uint ty in new[] { (uint)TYMED.TYMED_ISTREAM, (uint)TYMED.TYMED_HGLOBAL })
+        {
+            var fmt = new FORMATETC { cfFormat = (ushort)cf, dwAspect = 1, lindex = index, tymed = ty };
+            try { data->QueryGetData(fmt); }
+            catch { continue; }
+            var medium = default(STGMEDIUM);
+            try { data->GetData(in fmt, out medium); }
+            catch { continue; }
+            try
+            {
+                if (medium.tymed == TYMED.TYMED_ISTREAM && medium.u.pstm is not null)
+                    return ReadAllFromStream(medium.u.pstm);
+                if (medium.tymed == TYMED.TYMED_HGLOBAL && medium.u.hGlobal.Value is not null)
+                {
+                    void* p = GlobalLock(medium.u.hGlobal);
+                    if (p is null) return null;
+                    try
+                    {
+                        nuint size = GlobalSize(medium.u.hGlobal);
+                        if (size == 0 || size > (nuint)MaxVirtualBytes) return null;
+                        var buf = new byte[size];
+                        Marshal.Copy((nint)p, buf, 0, (int)size);
+                        return buf;
+                    }
+                    finally { _ = GlobalUnlock(medium.u.hGlobal); }
+                }
+            }
+            finally { ReleaseStgMedium(ref medium); }
+        }
+        return null;
+    }
+
+    private static unsafe byte[]? ReadAllFromStream(void* pstm)
+    {
+        // chunks hasta EOF (sin confiar en Stat): origenes que mienten el size
+        var out_ = new System.IO.MemoryStream();
+        try
+        {
+            void** vt = *(void***)pstm;
+            var read = (delegate* unmanaged[Stdcall]<void*, void*, uint, uint*, int>)vt[3];
+            byte[] chunk = new byte[65536];
+            fixed (byte* cb = chunk)
+            {
+                uint got = 0;
+                while (out_.Length < MaxVirtualBytes)
+                {
+                    int hr = read(pstm, cb, 65536, &got);
+                    if (hr != 0 || got == 0) break;
+                    out_.Write(chunk, 0, (int)got);
+                    if (got < 65536) break;
+                }
+            }
+            return out_.Length > 0 ? out_.ToArray() : null;
+        }
+        catch { return null; }
+        finally { out_.Dispose(); }
+    }
+
+    internal static string SanitizeFileName(string name)
+    {
+        foreach (char c in System.IO.Path.GetInvalidFileNameChars())
+            name = name.Replace(c, '_');
+        return string.IsNullOrWhiteSpace(name) ? $"imagen_{Guid.NewGuid():N}.png" : name.Trim();
+    }
+
+    // snapshot a temp: el stack guarda archivos REALES (re-dropeables).
+    // Devuelve el path final o null.
+    public static string? SnapshotVirtualFile(string fileName, byte[] content)
+    {
+        try
+        {
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ViennaBar", "drop");
+            System.IO.Directory.CreateDirectory(dir);
+            if (content.Length == 0 || content.Length > MaxVirtualBytes) return null;
+            string dest = UniquePath(System.IO.Path.Combine(dir, SanitizeFileName(fileName)));
+            System.IO.File.WriteAllBytes(dest, content);
+            return dest;
+        }
+        catch { return null; }
+    }
+
+    internal static string UniquePath(string path)
+    {
+        if (!System.IO.File.Exists(path)) return path;
+        string dir = System.IO.Path.GetDirectoryName(path)!;
+        string name = System.IO.Path.GetFileNameWithoutExtension(path);
+        string ext = System.IO.Path.GetExtension(path);
+        int i = 1;
+        string candidate;
+        do { candidate = System.IO.Path.Combine(dir, $"{name} ({i}){ext}"); i++; }
+        while (System.IO.File.Exists(candidate));
+        return candidate;
+    }
+
+    // =============== thumbnails: IShellItemImageFactory -> BGRA premultiplicado ===============
+    // HBITMAP -> DIBits (GetDC de pantalla) -> buffer BGRA normalizado
+    // (a==0 se asume padding opaco; si no, premultiplica). El core sube el
+    // buffer a D2D una vez y lo cachea por path.
+    [StructLayout(LayoutKind.Sequential)]
+    private unsafe struct BITMAPINFOHEADER
+    {
+        public uint biSize;
+        public int biWidth;
+        public int biHeight;
+        public ushort biPlanes;
+        public ushort biBitCount;
+        public uint biCompression;
+        public uint biSizeImage;
+        public int biXPelsPerMeter;
+        public int biYPelsPerMeter;
+        public uint biClrUsed;
+        public uint biClrImportant;
+    }
+
+    [DllImport("user32.dll", EntryPoint = "GetDC")]
+    private static extern void* GetDCRaw(void* hwnd);
+
+    [DllImport("user32.dll", EntryPoint = "ReleaseDC")]
+    private static extern int ReleaseDCRaw(void* hwnd, void* hdc);
+
+    [DllImport("gdi32.dll", EntryPoint = "GetDIBits")]
+    private static extern int GetDIBitsRaw(void* hdc, void* hbmp, uint start, uint lines,
+        void* bits, BITMAPINFOHEADER* info, uint usage);
+
+    [DllImport("gdi32.dll", EntryPoint = "DeleteObject")]
+    private static extern bool DeleteObjectRaw(void* obj);
+
+    // Devuelve (buffer CoTaskMem BGRA, w, h). Liberar con FreeThumbnail.
+    // null = sin thumb (el caller dibuja solo texto).
+    public static (nint buf, int w, int h)? GetThumbnailPixels(string path, int size)
+    {
+        if (string.IsNullOrEmpty(path) || size < 16 || size > 256) return null;
+        void* hbmp = null;
+        try
+        {
+            Guid iid = Windows.Win32.UI.Shell.IShellItemImageFactory.IID_Guid;
+            void* raw = null;
+            // SHCreateItemFromParsingName(path, null, IID_IShellItemImageFactory, &raw)
+            fixed (char* p = path)
+            {
+                var hr = SHCreateItemFromParsingName(p, null, &iid, &raw);
+                if (hr.Failed || raw is null) return null;
+            }
+            var img = (Windows.Win32.UI.Shell.IShellItemImageFactory*)raw;
+            try
+            {
+                var sz = new Windows.Win32.Foundation.SIZE { cx = size, cy = size };
+                var hb = default(Windows.Win32.Graphics.Gdi.HBITMAP);
+                try
+                {
+                    // GetImage(SIZE, SIIGBF_RESIZETOFIT=0, &HBITMAP): void, throw en fallo
+                    img->GetImage(sz, 0, &hb);
+                }
+                catch { return null; }
+                if (hb.Value == 0) return null;
+                hbmp = (void*)hb.Value;
+            }
+            finally { _ = img->Release(); }
+        }
+        catch { return null; }
+        try { return HBitmapToBgra(hbmp, size); }
+        finally { DeleteObjectRaw(hbmp); }
+    }
+
+    private static unsafe (nint buf, int w, int h)? HBitmapToBgra(void* hbmp, int size)
+    {
+        void* hdc = GetDCRaw(null);
+        if (hdc is null) return null;
+        try
+        {
+            var bi = new BITMAPINFOHEADER
+            {
+                biSize = (uint)sizeof(BITMAPINFOHEADER),
+                biWidth = size,
+                biHeight = -size,   // top-down: sin flip
+                biPlanes = 1,
+                biBitCount = 32,
+                biCompression = 0,   // BI_RGB
+            };
+            int bytes = size * size * 4;
+            nint mem = Marshal.AllocCoTaskMem(bytes);
+            try
+            {
+                int lines = GetDIBitsRaw(hdc, hbmp, 0, (uint)size, (void*)mem, &bi, 0);
+                if (lines == 0) { Marshal.FreeCoTaskMem(mem); return null; }
+                // normalizar alfa: padding opaco (a==0 -> 255), resto premultiplicado
+                uint* px = (uint*)mem;
+                int n = size * size;
+                for (int i = 0; i < n; i++)
+                {
+                    uint p = px[i];
+                    uint a = p >> 24;
+                    if (a == 0) px[i] = p | 0xFF000000u;
+                    else if (a != 255)
+                    {
+                        uint r = ((p >> 16) & 255) * a / 255;
+                        uint g = ((p >> 8) & 255) * a / 255;
+                        uint b = (p & 255) * a / 255;
+                        px[i] = (a << 24) | (r << 16) | (g << 8) | b;
+                    }
+                }
+                return (mem, size, size);
+            }
+            catch { Marshal.FreeCoTaskMem(mem); return null; }
+        }
+        finally { _ = ReleaseDCRaw(null, hdc); }
+    }
+
+    public static void FreeThumbnail(nint buf)
+    {
+        if (buf != 0) Marshal.FreeCoTaskMem(buf);
+    }
+
     // Devuelve los paths del CF_HDROP (o lista vacÃ­a). El core lo llama desde
     // el CCW IDropTarget con el void* que le entrega OLE.
 

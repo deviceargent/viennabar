@@ -111,57 +111,7 @@ internal sealed class Widgets : IDisposable
             }
         }
 
-        // ---- Drop Stack panel: zona de drop visible (el CCW acepta toda la
-        // ventana; este panel muestra el stack + estado del drag) ----
-        by += 24;
-        _stackPanelY = by;
-        _stackPanelH = h - by - 4;
-        _stackPanelW = w;
-        float panelY = _stackPanelY, panelH = _stackPanelH;
-        if (panelH < 40) return;
-
-        // contenedor
-        ctx.FillRect(_dragOver ? Skin.Sel : Skin.Search, 4, panelY, w - 8, panelH);
-        ctx.Line(Skin.Divider, 4, panelY, w - 4, panelY);
-        ctx.Line(Skin.Divider, 4, panelY + panelH, w - 4, panelY + panelH);
-        ctx.Line(Skin.Divider, 4, panelY, 4, panelY + panelH);
-        ctx.Line(Skin.Divider, w - 4, panelY, w - 4, panelY + panelH);
-
-        // header
-        string header = _dragOver ? "suelta para apilar" : $"Stack ({_dropStack?.Count ?? 0})";
-        ctx.Text(header, AppText.FmtBig, _dragOver ? Skin.Text : Skin.Muted, 10, panelY + 4, w - 20, 16);
-
-        // items (max los que entren)
-        if (_dropStack is not null)
-        {
-            float iy = panelY + 22;
-            int n = Math.Min(_dropStack.Count, (int)((panelH - 26) / 16f));
-            int first = Math.Max(0, _dropStack.Count - n);   // ultimos N
-            for (int i = _dropStack.Count - 1; i >= first && iy < panelY + panelH - 16; i--)
-            {
-                var name = _dropStack[i];
-                int cut = name.LastIndexOf('\\');
-                if (cut >= 0) name = name[(cut + 1)..];
-                if (i == _pressedItem)
-                    ctx.FillRect(Skin.Sel, 6, iy - 1, w - 12, 16);
-                ctx.Text(name, AppText.Fmt, Skin.Text, 10, iy, w - 24, 14);
-                iy += 16;
-            }
-        }
     }
-
-    // wiring del drop (App lo conecta en MessageLoop)
-    internal void SetDropStack(List<string> stack) => _dropStack = stack;
-    internal void SetDragOver(bool over)
-    {
-        if (_dragOver != over)
-        {
-            _dragOver = over;
-            App.Instance?.Invalidate();
-        }
-    }
-    private List<string>? _dropStack;
-    private bool _dragOver;
 
     // ---- discos fijos (widget 4): sample en cada tick, sin I/O de archivos ----
     private readonly List<(string label, double usedFrac)> _disks = new();
@@ -285,41 +235,6 @@ internal sealed class Widgets : IDisposable
 
     private float _clipY0;
     private int _clipN;
-
-    // ---- drag-out del stack: hit-test de los items visibles ----
-    // Mismo layout que Render: ultimos N items visibles, 16px por item,
-    // primer item (mas nuevo) ARRIBA del panel. Devuelve index en el stack
-    // o -1. x,y en coordenadas del tercio widgets.
-    internal int StackHitTest(int x, int y)
-    {
-        if (_dropStack is null || _dropStack.Count == 0 || _stackPanelH < 40) return -1;
-        int n = Math.Min(_dropStack.Count, Math.Max(1, (int)((_stackPanelH - 26) / 16f)));
-        int first = Math.Max(0, _dropStack.Count - n);
-        float iy = _stackPanelY + 22;
-        for (int i = _dropStack.Count - 1; i >= first; i--)
-        {
-            if (y >= iy && y < iy + 16) return i;
-            iy += 16;
-        }
-        return -1;
-    }
-
-    // item resaltado durante el press (feedback), -1 = ninguno
-    internal void SetPressedItem(int index)
-    {
-        if (_pressedItem != index)
-        {
-            _pressedItem = index;
-            App.Instance?.Invalidate();
-        }
-    }
-
-    // dimensiones del panel (actualizadas en cada Render; el hit-test ocurre
-    // tras al menos un paint con la barra visible)
-    private float _stackPanelY;
-    private float _stackPanelH;
-    private float _stackPanelW;
-    private int _pressedItem = -1;
 
     private static void DrawBar(RenderCtx ctx, float x, float y, float w, float h, double frac)
     {

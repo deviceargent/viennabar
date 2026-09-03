@@ -43,6 +43,8 @@ internal static class Program
             if (stage == "nav") return StageNav();
             if (stage == "launcher") return StageLauncher();
             if (stage == "m2ifeo") return StageM2Ifeo();
+            if (stage == "virtual") return StageVirtual();
+            if (stage == "thumb") return StageThumb();
             if (stage == "headless") return StageHeadless();
 
             Log("stage1: OpenAppsFolder");
@@ -225,6 +227,8 @@ internal static class Program
         if (StageNav() != 0) rc = 1;
         if (StageLauncher() != 0) rc = 1;
         if (StageM2Ifeo() != 0) rc = 1;
+        if (StageVirtual() != 0) rc = 1;
+        if (StageThumb() != 0) rc = 1;
         Log(rc == 0 ? "=== headless ALL PASS" : "=== headless FAILURES");
         return rc;
     }
@@ -609,6 +613,91 @@ internal static class Program
         try { System.IO.Directory.Delete(System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "vb-navtest"), true); } catch { }
         tree.Dispose();
+        return _failures == 0 ? 0 : 1;
+    }
+
+    private static unsafe int StageVirtual()
+    {
+        _failures = 0;
+        Log("-- virtual");
+        // descriptor fabricado: count=2 + nombres en offsets ABI (72, 592 stride)
+        int total = 4 + 2 * 592;
+        nint mem = System.Runtime.InteropServices.Marshal.AllocHGlobal(total);
+        try
+        {
+            byte* p = (byte*)mem;
+            for (int i = 0; i < total; i++) p[i] = 0;
+            *(uint*)p = 2;
+            string n1 = "foto.png", n2 = "a/b\\mal:.txt";
+            fixed (char* c1 = n1, c2 = n2)
+            {
+                char* d1 = (char*)(p + 4 + 72);
+                char* d2 = (char*)(p + 4 + 592 + 72);
+                for (int i = 0; i < n1.Length; i++) d1[i] = c1[i];
+                for (int i = 0; i < n2.Length; i++) d2[i] = c2[i];
+            }
+            var names = Shell.ParseDescriptorNames((void*)mem);
+            Check(names.Count == 2 && names[0] == "foto.png", $"virtual: parse x2 ({names.Count})");
+            Check(names.Count == 2 && names[1] == "a/b\\mal:.txt", "virtual: parse crudo (sin sanitizar)");
+            Check(Shell.SanitizeFileName("a/b\\mal:.txt") == "a_b_mal_.txt", "virtual: sanitize");
+        }
+        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(mem); }
+        // count=0 y count absurdo no explotan
+        nint z = System.Runtime.InteropServices.Marshal.AllocHGlobal(8);
+        try
+        {
+            *(uint*)(void*)z = 0;
+            // second dword garbage para el caso absurdo
+            *((uint*)(void*)z + 1) = 999;
+            Check(Shell.ParseDescriptorNames((void*)z).Count == 0, "virtual: count 0");
+            *(uint*)(void*)z = 999;
+            Check(Shell.ParseDescriptorNames((void*)z).Count == 0, "virtual: count absurdo");
+        }
+        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(z); }
+        // sanitize directo: vacio -> imagen_<32hex>.png
+        string gen = Shell.SanitizeFileName("  ");
+        Check(gen.StartsWith("imagen_") && gen.EndsWith(".png") && gen.Length == 43, "virtual: nombre vacio genera png");
+        // snapshot round-trip + dedup
+        byte[] blob = [1, 2, 3, 4];
+        string? s1 = Shell.SnapshotVirtualFile("a.bin", blob);
+        string? s2 = Shell.SnapshotVirtualFile("a.bin", blob);
+        Check(s1 is not null && System.IO.File.Exists(s1), "virtual: snapshot escribe");
+        Check(s2 is not null && s2 != s1 && s2.EndsWith("a (1).bin")
+            && System.IO.File.ReadAllBytes(s2).Length == 4, "virtual: dedup (1)");
+        Check(Shell.SnapshotVirtualFile("x.bin", []) is null, "virtual: vacio -> null");
+        try
+        {
+            if (s1 is not null) System.IO.File.Delete(s1);
+            if (s2 is not null) System.IO.File.Delete(s2);
+        }
+        catch { }
+        return _failures == 0 ? 0 : 1;
+    }
+
+    private static int StageThumb()
+    {
+        _failures = 0;
+        Log("-- thumb");
+        // archivo real chico: el shell debe devolver pixels (icono o thumb)
+        string f = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-thumbtest.txt");
+        System.IO.File.WriteAllText(f, "x");
+        var px = Shell.GetThumbnailPixels(f, 64);
+        Check(px is not null && px.Value.w == 64 && px.Value.h == 64, "thumb: txt 64px");
+        if (px is not null)
+        {
+            bool any = false;
+            unsafe
+            {
+                uint* p = (uint*)(void*)px.Value.buf;
+                for (int i = 0; i < 64 * 64; i++) { if (p[i] != 0) { any = true; break; } }
+            }
+            Check(any, "thumb: buffer con contenido");
+            Shell.FreeThumbnail(px.Value.buf);
+        }
+        Check(Shell.GetThumbnailPixels(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-noexiste-xyz.bin"), 64) is null,
+            "thumb: missing -> null");
+        Check(Shell.GetThumbnailPixels(f, 8) is null, "thumb: size chico -> null");
+        try { System.IO.File.Delete(f); } catch { }
         return _failures == 0 ? 0 : 1;
     }
 
