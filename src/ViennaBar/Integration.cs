@@ -197,9 +197,14 @@ internal static class Integration
         bool createdLink = false;
         if (!System.IO.File.Exists(linkPath))
         {
-            try { createdLink = CreateHardLinkW(linkPath, linkTarget, 0); }
-            catch { createdLink = false; }
-            if (!createdLink) return $"M2: no se pudo crear el hardlink {linkPath} (sin cambios)";
+            int linkErr = 0;
+            try
+            {
+                createdLink = CreateHardLinkW(linkPath, linkTarget, 0);
+                if (!createdLink) linkErr = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+            }
+            catch { createdLink = false; linkErr = -1; }
+            if (!createdLink) return $"M2: no se pudo crear el hardlink {linkPath} (win32={linkErr}, sin cambios)";
         }
 
         if (!haveBackup)
