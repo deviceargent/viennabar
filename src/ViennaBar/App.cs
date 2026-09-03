@@ -69,6 +69,26 @@ internal sealed unsafe class App : IDisposable
             Shell.NotifyAssocChanged();
             return 0;
         }
+        // F3/M2: IFEO sobre explorer.exe (REQUIERE terminal elevada; sin ventana).
+        // El apply vivo es prueba MANUAL con el usuario presente (admin + riesgo).
+        if (args.Length >= 1 && args[0] == "--m2-apply")
+        {
+            string dir = System.IO.Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? "";
+            Console.WriteLine(Integration.ApplyM2(Microsoft.Win32.Registry.LocalMachine,
+                @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options",
+                Microsoft.Win32.Registry.CurrentUser, @"Software\ViennaBar\M2Backup",
+                System.IO.Path.Combine(dir, "ViennaBar.Launcher.exe"),
+                System.IO.Path.Combine(dir, "explorer-vb.exe"),
+                @"C:\Windows\explorer.exe", DesktopRescuePath("ViennaBar-M2-revert.reg")));
+            return 0;
+        }
+        if (args.Length >= 1 && args[0] == "--m2-revert")
+        {
+            Console.WriteLine(Integration.RevertM2(Microsoft.Win32.Registry.LocalMachine,
+                @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options",
+                Microsoft.Win32.Registry.CurrentUser, @"Software\ViennaBar\M2Backup"));
+            return 0;
+        }
 
         // ProtocolRouter: --open-folder <path> (M1 lo invoca por doble-click)
         if (args.Length >= 2 && args[0] == "--open-folder")
@@ -90,8 +110,9 @@ internal sealed unsafe class App : IDisposable
 
     private static string? s_pendingOpenFolder;
 
-    private static string DesktopRescuePath() => System.IO.Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "ViennaBar-M1-revert.reg");
+    private static string DesktopRescuePath(string file = "ViennaBar-M1-revert.reg") =>
+        System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), file);
 
     // hot-reload de skin: recrea brushes con tokens nuevos y repinta
     internal void ReloadSkin(Skin skin)

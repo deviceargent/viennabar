@@ -158,6 +158,131 @@ internal static class Integration
     }
 
     private static string RegEscape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+
+    // =============== M2 IFEO (solo codigo: el apply vivo requiere admin) ===============
+
+    internal static bool IsElevated()
+    {
+        try
+        {
+            using var id = System.Security.Principal.WindowsIdentity.GetCurrent();
+            return new System.Security.Principal.WindowsPrincipal(id)
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch { return false; }
+    }
+
+    internal static string IfeoKeyPath(string ifeoRoot) => $"{ifeoRoot}\\explorer.exe";
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    private static extern bool CreateHardLinkW(string link, string target, nint reserved);
+
+    // Aplica el redirector IFEO. El passthrough usa un hardlink (mismo nombre
+    // distinto = IFEO no dispara) creado al lado del launcher: sin el, un
+    // switch desconocido entraria en loop, asi que sin link NO se escribe IFEO.
+    // backupRoot vive en HKCU (write-once, leccion M1). Devuelve resumen.
+    internal static string ApplyM2(RegistryKey hklm, string ifeoRoot, RegistryKey hkcu, string backupRoot,
+        string launcherPath, string linkPath, string linkTarget, string rescueRegPath, bool requireAdmin = true)
+    {
+        if (requireAdmin && !IsElevated()) return "M2: se necesita terminal elevada (admin)";
+        using var existing = hkcu.OpenSubKey(backupRoot, false);
+        bool haveBackup = existing?.GetValue("HadKey") is not null;   // backup plano (sin subclaves)
+        using var cur = hklm.OpenSubKey(IfeoKeyPath(ifeoRoot), false);
+        bool hadKey = cur is not null;
+        string? oldDebugger = cur?.GetValue("Debugger") as string;
+
+        // hardlink idempotente (si falta se crea y se registra propiedad)
+        bool createdLink = false;
+        if (!System.IO.File.Exists(linkPath))
+        {
+            try { createdLink = CreateHardLinkW(linkPath, linkTarget, 0); }
+            catch { createdLink = false; }
+            if (!createdLink) return $"M2: no se pudo crear el hardlink {linkPath} (sin cambios)";
+        }
+
+        if (!haveBackup)
+        {
+            using var bk = hkcu.CreateSubKey(backupRoot);
+            if (bk is not null)
+            {
+                bk.SetValue("HadKey", hadKey ? 1 : 0, RegistryValueKind.DWord);
+                if (oldDebugger is not null) bk.SetValue("Debugger", oldDebugger);
+                else try { bk.DeleteValue("Debugger", false); } catch { }
+                bk.SetValue("LinkCreated", createdLink ? 1 : 0, RegistryValueKind.DWord);
+                bk.SetValue("LinkPath", linkPath);
+            }
+            try
+            {
+                System.IO.File.WriteAllText(rescueRegPath,
+                    BuildRescueRegM2("HKEY_LOCAL_MACHINE", ifeoRoot, hadKey, oldDebugger));
+            }
+            catch { }
+        }
+        else if (createdLink)
+        {
+            // re-apply que si creo el link: actualizar solo propiedad
+            try
+            {
+                using var bk = hkcu.OpenSubKey(backupRoot, true);
+                bk?.SetValue("LinkCreated", 1, RegistryValueKind.DWord);
+                bk?.SetValue("LinkPath", linkPath);
+            }
+            catch { }
+        }
+
+        using var key = hklm.CreateSubKey(IfeoKeyPath(ifeoRoot));
+        if (key is null) return "M2: no se pudo escribir IFEO (sin cambios)";
+        key.SetValue("Debugger", $"\"{launcherPath}\"");
+        string kept = haveBackup ? " (backup original conservado)" : "";
+        return $"M2 aplicado (IFEO explorer.exe -> launcher){kept}";
+    }
+
+    internal static string RevertM2(RegistryKey hklm, string ifeoRoot, RegistryKey hkcu, string backupRoot)
+    {
+        using var bk = hkcu.OpenSubKey(backupRoot, false);
+        if (bk is null) return "M2: sin backup, nada que revertir";
+        bool hadKey = (bk.GetValue("HadKey") as int?) == 1;
+        string? oldDebugger = bk.GetValue("Debugger") as string;
+        bool linkCreated = (bk.GetValue("LinkCreated") as int?) == 1;
+        string? linkPath = bk.GetValue("LinkPath") as string;
+        if (hadKey)
+        {
+            using var key = hklm.CreateSubKey(IfeoKeyPath(ifeoRoot));
+            if (key is not null)
+            {
+                if (oldDebugger is not null) key.SetValue("Debugger", oldDebugger);
+                else try { key.DeleteValue("Debugger", false); } catch { }
+            }
+        }
+        else
+        {
+            using var key = hklm.OpenSubKey(IfeoKeyPath(ifeoRoot), true);
+            if (key is not null)
+            {
+                try { key.DeleteValue("Debugger", false); } catch { }
+                if (key.SubKeyCount == 0 && key.ValueCount == 0)
+                    try { hklm.DeleteSubKey(IfeoKeyPath(ifeoRoot), false); } catch { }
+            }
+        }
+        if (linkCreated && linkPath is not null)
+            try { System.IO.File.Delete(linkPath); } catch { }
+        try { hkcu.DeleteSubKeyTree(backupRoot, false); } catch { }
+        return "M2 revertido (IFEO restaurado)";
+    }
+
+    internal static string BuildRescueRegM2(string hivePrefix, string ifeoRoot, bool hadKey, string? oldDebugger)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Windows Registry Editor Version 5.00");
+        sb.AppendLine("; ViennaBar M2 revert — aplicar como ADMIN para restaurar IFEO");
+        sb.AppendLine();
+        string key = $"{hivePrefix}\\{IfeoKeyPath(ifeoRoot)}";
+        if (!hadKey) { sb.AppendLine($"[-{key}]"); return sb.ToString(); }
+        sb.AppendLine($"[{key}]");
+        sb.AppendLine(oldDebugger is not null
+            ? $"\"Debugger\"=\"{RegEscape(oldDebugger)}\"" : "\"Debugger\"=-");
+        return sb.ToString();
+    }
 }
 
 internal static unsafe class SingleInstance

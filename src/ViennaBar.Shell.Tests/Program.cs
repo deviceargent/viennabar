@@ -41,6 +41,8 @@ internal static class Program
             if (stage == "fileop") return StageFileOp();
             if (stage == "m1") return StageM1();
             if (stage == "nav") return StageNav();
+            if (stage == "launcher") return StageLauncher();
+            if (stage == "m2ifeo") return StageM2Ifeo();
             if (stage == "headless") return StageHeadless();
 
             Log("stage1: OpenAppsFolder");
@@ -221,6 +223,8 @@ internal static class Program
         if (StageFileOp() != 0) rc = 1;
         if (StageM1() != 0) rc = 1;
         if (StageNav() != 0) rc = 1;
+        if (StageLauncher() != 0) rc = 1;
+        if (StageM2Ifeo() != 0) rc = 1;
         Log(rc == 0 ? "=== headless ALL PASS" : "=== headless FAILURES");
         return rc;
     }
@@ -618,5 +622,88 @@ internal static class Program
             if (d is not null) return d;
         }
         return null;
+    }
+
+    private static int StageLauncher()
+    {
+        _failures = 0;
+        Log("-- launcher");
+        Check(ViennaBar.Launcher.Launcher.Classify([]).Kind == ViennaBar.Launcher.TargetKind.Reveal,
+            "launcher: sin args -> Reveal");
+        string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-launchertest");
+        string sub = System.IO.Path.Combine(dir, "sub");
+        string file = System.IO.Path.Combine(dir, "a.txt");
+        System.IO.Directory.CreateDirectory(sub);
+        System.IO.File.WriteAllText(file, "x");
+        var t = ViennaBar.Launcher.Launcher.Classify([sub]);
+        Check(t.Kind == ViennaBar.Launcher.TargetKind.Folder
+            && t.Path == System.IO.Path.GetFullPath(sub), "launcher: carpeta -> Folder");
+        Check(ViennaBar.Launcher.Launcher.Classify([file]).Kind == ViennaBar.Launcher.TargetKind.Passthrough,
+            "launcher: archivo -> Passthrough");
+        Check(ViennaBar.Launcher.Launcher.Classify(["/e"]).Kind == ViennaBar.Launcher.TargetKind.Passthrough,
+            "launcher: switch -> Passthrough");
+        Check(ViennaBar.Launcher.Launcher.Classify(["-Embedding"]).Kind == ViennaBar.Launcher.TargetKind.Passthrough,
+            "launcher: flag -> Passthrough");
+        Check(ViennaBar.Launcher.Launcher.Classify(["shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"]).Kind
+            == ViennaBar.Launcher.TargetKind.Passthrough, "launcher: shell: -> Passthrough");
+        Check(ViennaBar.Launcher.Launcher.Classify(["search-ms:query=x"]).Kind
+            == ViennaBar.Launcher.TargetKind.Passthrough, "launcher: search-ms -> Passthrough");
+        Check(ViennaBar.Launcher.Launcher.Classify([System.IO.Path.Combine(dir, "noexiste")]).Kind
+            == ViennaBar.Launcher.TargetKind.Passthrough, "launcher: inexistente -> Passthrough");
+        Check(ViennaBar.Launcher.Launcher.QuoteArgs(["a", "b c", "d\"e"]) == "a \"b c\" \"d\\\"e\"",
+            "launcher: QuoteArgs");
+        try { System.IO.Directory.Delete(dir, true); } catch { }
+        return _failures == 0 ? 0 : 1;
+    }
+
+    private static int StageM2Ifeo()
+    {
+        _failures = 0;
+        Log("-- m2ifeo (sandbox HKCU, sin elevacion, sin HKLM)");
+        string sb = @"Software\ViennaBarTests_M2";
+        string ifeo = sb + @"\IFEO";
+        string backup = sb + @"\Backup";
+        var hive = Microsoft.Win32.Registry.CurrentUser;
+        try { hive.DeleteSubKeyTree(sb, false); } catch { }
+        // seed: Debugger pre-existente (ej. otra herramienta)
+        using (var k = hive.CreateSubKey(ifeo + @"\explorer.exe"))
+        {
+            k?.SetValue("Debugger", "old-dbg.exe");
+        }
+        string blobDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-m2test");
+        System.IO.Directory.CreateDirectory(blobDir);
+        string target = System.IO.Path.Combine(blobDir, "target.txt");
+        System.IO.File.WriteAllText(target, "x");
+        string link = System.IO.Path.Combine(blobDir, "link.exe");
+        string regPath = System.IO.Path.Combine(blobDir, "m2.reg");
+        string summary = ViennaBar.Integration.ApplyM2(hive, ifeo, hive, backup,
+            @"C:\fake\ViennaBar.Launcher.exe", link, target, regPath, requireAdmin: false);
+        Check(summary.Contains("M2 aplicado"), "m2: apply resumen");
+        using (var k = hive.OpenSubKey(ifeo + @"\explorer.exe", false))
+            Check(k is not null && (k.GetValue("Debugger") as string) == "\"C:\\fake\\ViennaBar.Launcher.exe\"",
+                "m2: Debugger citado");
+        Check(System.IO.File.Exists(link), "m2: hardlink creado");
+        using (var k = hive.OpenSubKey(backup, false))
+            Check(k is not null && (k.GetValue("HadKey") as int?) == 1
+                && (k.GetValue("Debugger") as string) == "old-dbg.exe"
+                && (k.GetValue("LinkCreated") as int?) == 1, "m2: backup write-once ready");
+        string reg = System.IO.File.ReadAllText(regPath);
+        Check(reg.Contains("HKEY_LOCAL_MACHINE") && reg.Contains("old-dbg.exe") && reg.Contains("ADMIN"),
+            "m2: rescue .reg");
+        string summary2 = ViennaBar.Integration.ApplyM2(hive, ifeo, hive, backup,
+            @"C:\otro\L.exe", link, target, regPath, requireAdmin: false);
+        Check(summary2.Contains("conservado"), "m2: segundo apply conserva backup");
+        string back = ViennaBar.Integration.RevertM2(hive, ifeo, hive, backup);
+        Check(back.Contains("M2 revertido"), "m2: revert resumen");
+        using (var k = hive.OpenSubKey(ifeo + @"\explorer.exe", false))
+            Check(k is not null && (k.GetValue("Debugger") as string) == "old-dbg.exe",
+                "m2: Debugger restaurado");
+        Check(!System.IO.File.Exists(link), "m2: hardlink propio se borra");
+        Check(hive.OpenSubKey(backup, false) is null, "m2: backup se borra");
+        Check(ViennaBar.Integration.RevertM2(hive, ifeo, hive, backup).Contains("nada que revertir"),
+            "m2: revert sin backup");
+        try { hive.DeleteSubKeyTree(sb, false); } catch { }
+        try { System.IO.Directory.Delete(blobDir, true); } catch { }
+        return _failures == 0 ? 0 : 1;
     }
 }
