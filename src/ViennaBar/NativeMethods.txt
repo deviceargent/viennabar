@@ -164,3 +164,7 @@ GetWindowRect
 ClientToScreen
 WM_RBUTTONUP
 WM_RBUTTONDOWN
+SetCapture
+ReleaseCapture
+GetCapture
+WM_CAPTURECHANGED

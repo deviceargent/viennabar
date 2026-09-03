@@ -372,6 +372,92 @@ internal static unsafe class ShellNative
 
     // =============== drop: parse CF_HDROP de un IDataObject* crudo ===============
 
+    // =============== drag-out: IDataObject del shell para paths del stack ===============
+    // Crea un IDataObject del shell con CF_HDROP de los paths. Reusa el objeto
+    // del shell (SHCreateDataObject con parent null) y le setea el CF_HDROP
+    // globalmem: los targets ven un data object "del shell" con todos los
+    // formatos derivados que el shell agrega on-demand.
+    // Devuelve IDataObject* (AddRef ya tomado por SHCreateDataObject). 0 = fail.
+    public static nint CreateDataObjectFromPaths(IList<string> paths)
+    {
+        const Windows.Win32.System.Memory.GLOBAL_ALLOC_FLAGS GMEM_MOVEABLE =
+            (Windows.Win32.System.Memory.GLOBAL_ALLOC_FLAGS)0x0002;
+        if (paths.Count == 0) return 0;
+
+        // HGLOBAL del CF_HDROP: DROPFILES [header][strings...]\0\0
+        int chars = 0;
+        foreach (var p in paths) chars += p.Length + 1;
+        int total = 20 + (chars + 1) * 2;   // DROPFILES (20B) + double-null
+        var hglobal = GlobalAlloc(GMEM_MOVEABLE, (nuint)total);
+        if (hglobal == 0) return 0;
+
+        bool ok = false;
+        var pDrop = (DROPFILES*)GlobalLock(hglobal);
+        if (pDrop is not null)
+        {
+            try
+            {
+                *pDrop = new DROPFILES { pFiles = 20, fNC = default, pt = default, fWide = (Windows.Win32.Foundation.BOOL)1 };
+                char* dst = (char*)((byte*)pDrop + 20);
+                foreach (var p in paths)
+                {
+                    int i = 0;
+                    while (i < p.Length) *dst++ = p[i++];
+                    *dst++ = '\0';
+                }
+                *dst = '\0';   // terminator double-null
+                ok = true;
+            }
+            finally { _ = GlobalUnlock(hglobal); }
+        }
+        if (!ok) { _ = GlobalFree(hglobal); return 0; }
+
+        Guid iidData = Windows.Win32.System.Com.IDataObject.IID_Guid;
+        HRESULT hr;
+        void* raw = null;
+        try
+        {
+            hr = SHCreateDataObject(null, 0, null, null, &iidData, &raw);
+        }
+        catch { hr = default; raw = null; }
+        if (hr.Failed || raw is null) { _ = GlobalFree(hglobal); return 0; }
+
+        var data = (Windows.Win32.System.Com.IDataObject*)raw;
+        try
+        {
+            var fmt = new FORMATETC { cfFormat = 15, dwAspect = 1, lindex = -1, tymed = (uint)TYMED.TYMED_HGLOBAL };
+            var medium = new STGMEDIUM
+            {
+                tymed = TYMED.TYMED_HGLOBAL,
+                u = new Windows.Win32.System.Com.STGMEDIUM._u_e__Union { hGlobal = hglobal },
+            };
+            data->SetData(in fmt, in medium, (Windows.Win32.Foundation.BOOL)1);   // fRelease=1: el objeto toma el HGLOBAL
+            return (nint)data;   // ref del SHCreateDataObject pasa al caller
+        }
+        catch
+        {
+            _ = data->Release();
+            _ = GlobalFree(hglobal);
+            return 0;
+        }
+    }
+
+    // DoDragDrop con todo raw. El dataObj lo crea CreateDataObjectFromPaths,
+    // el dropSource es la CCW de DropSourceCcw. Devuelve (hr, effect).
+    public static (int hr, uint effect) DragOut(nint dataObj, nint dropSourceUnknown, uint okEffects)
+    {
+        var data = (Windows.Win32.System.Com.IDataObject*)dataObj;
+        var src = (Windows.Win32.System.Ole.IDropSource*)dropSourceUnknown;
+        var effect = default(Windows.Win32.System.Ole.DROPEFFECT);
+        var hr = DoDragDrop(data, src, (Windows.Win32.System.Ole.DROPEFFECT)okEffects, &effect);
+        return ((int)hr, (uint)effect);
+    }
+
+    public static void ReleaseDataObject(nint dataObj)
+    {
+        if (dataObj != 0) _ = ((Windows.Win32.System.Com.IUnknown*)dataObj)->Release();
+    }
+
     // test AOT del paso QueryContextMenu aislado (bisect del hang F2.1b):
     // GetUIObjectOf(IContextMenu) + QueryContextMenu + DestroyMenu. Sin Track.
     public static string DebugTestQueryContextMenu(IShellFolder* parentFolder, byte[] childPidl)
@@ -396,6 +482,7 @@ internal static unsafe class ShellNative
         }
         finally { CoTaskMemFree(child); }
     }
+
     // Devuelve los paths del CF_HDROP (o lista vacÃ­a). El core lo llama desde
     // el CCW IDropTarget con el void* que le entrega OLE.
 

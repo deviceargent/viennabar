@@ -229,6 +229,38 @@ internal sealed unsafe class App : IDisposable
         return pt.X >= r.left && pt.X < r.right && pt.Y >= r.top && pt.Y < r.bottom;
     }
 
+    // ---- drag-out del Drop Stack ----
+    private int _pressIdx = -1;                 // item del stack con boton izq abajo
+    private (int, int) _pressPt;
+    private ViennaBar.ShellNative.DropSourceCcw? _dropSource;
+
+    // arranca DoDragDrop con el item idx del stack. Corre en el hilo UI
+    // (STA) — modal hasta soltar.
+    private void StartDragOut(int idx)
+    {
+        var stack = _drop.DropStack;
+        if (idx < 0 || idx >= stack.Count) return;
+        var path = stack[idx];
+        AppLog($"dragout: begin idx={idx} path={path}");
+
+        var dataObj = ViennaBar.ShellNative.ShellNative.CreateDataObjectFromPaths(new[] { path });
+        if (dataObj == 0) { AppLog("dragout: CreateDataObject FAIL"); return; }
+
+        _dropSource ??= new ViennaBar.ShellNative.DropSourceCcw();
+
+        // COPY | MOVE | LINK: el target decide; con MOVE (e.g. mover a otra
+        // carpeta) sacamos el item del stack
+        var (hr, effect) = ViennaBar.ShellNative.ShellNative.DragOut(dataObj, _dropSource.IUnknownPtr, 7);
+        ViennaBar.ShellNative.ShellNative.ReleaseDataObject(dataObj);
+        AppLog($"dragout: DoDragDrop hr=0x{hr:X} effect={effect}");
+
+        if (hr == 0x00040100 /* DRAGDROP_S_DROP */ && (effect & 2) != 0 /* MOVE */)
+        {
+            stack.RemoveAt(idx);
+            Invalidate();
+        }
+    }
+
     internal static void AppLog(string s)
     {
         try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "viennabar-app.log"), $"{DateTime.Now:HH:mm:ss.fff} {s}\n"); }
@@ -281,23 +313,6 @@ internal sealed unsafe class App : IDisposable
                 return default;
             }
 
-            case WM_MOUSEMOVE:
-                if (_hidden)
-                {
-                    _ = SetTimer(hwnd, TimerReveal, RevealDelayMs, null);
-                }
-                else
-                {
-                    var tme = new TRACKMOUSEEVENT
-                    {
-                        cbSize = (uint)sizeof(TRACKMOUSEEVENT),
-                        dwFlags = TRACKMOUSEEVENT_FLAGS.TME_LEAVE,
-                        hwndTrack = hwnd,
-                    };
-                    _ = TrackMouseEvent(ref tme);
-                }
-                return default;
-
             case WM_MOUSELEAVE:
                 // durante un drag OLE el capture se va al drag helper y llegan
                 // WM_MOUSELEAVE espurios → NO ocultar la barra en mitad de un drop
@@ -333,8 +348,71 @@ internal sealed unsafe class App : IDisposable
                 return default;
 
             case WM_LBUTTONUP:
+            {
                 AppLog($"click L at {GET_X_LPARAM(lparam)},{GET_Y_LPARAM(lparam)} (widgetsH={WidgetsH}, treeH={TreeH})");
+                if (_pressIdx >= 0)
+                {
+                    // click sin arrastrar sobre item del stack: cancelar press
+                    ReleaseCapture();
+                    _pressIdx = -1;
+                    _widgets.SetPressedItem(-1);
+                }
                 OnClick(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+                return default;
+            }
+
+            case WM_LBUTTONDOWN:
+            {
+                int px = GET_X_LPARAM(lparam), py = GET_Y_LPARAM(lparam);
+                if (py < WidgetsH)
+                {
+                    int idx = _widgets.StackHitTest(px, py);
+                    if (idx >= 0)
+                    {
+                        // begin drag-out potencial del item idx del stack
+                        _pressIdx = idx;
+                        _pressPt = (px, py);
+                        _widgets.SetPressedItem(idx);
+                        _ = SetCapture(hwnd);
+                    }
+                }
+                return default;
+            }
+
+            case WM_MOUSEMOVE:
+                if (_pressIdx >= 0)
+                {
+                    int px = GET_X_LPARAM(lparam), py = GET_Y_LPARAM(lparam);
+                    int dx = px - _pressPt.Item1, dy = py - _pressPt.Item2;
+                    if ((dx * dx + dy * dy) > 25)   // umbral 5px (SM_CXDRAG aprox)
+                    {
+                        var idx = _pressIdx;
+                        ReleaseCapture();
+                        _pressIdx = -1;
+                        _widgets.SetPressedItem(-1);
+                        StartDragOut(idx);
+                    }
+                }
+                else if (_hidden)
+                {
+                    _ = SetTimer(hwnd, TimerReveal, RevealDelayMs, null);
+                }
+                else
+                {
+                    var tme = new TRACKMOUSEEVENT
+                    {
+                        cbSize = (uint)sizeof(TRACKMOUSEEVENT),
+                        dwFlags = TRACKMOUSEEVENT_FLAGS.TME_LEAVE,
+                        hwndTrack = hwnd,
+                    };
+                    _ = TrackMouseEvent(ref tme);
+                }
+                return default;
+
+            case WM_CAPTURECHANGED:
+                // perdida de capture ajena (p.ej. ventana popup): cancelar press
+                _pressIdx = -1;
+                _widgets.SetPressedItem(-1);
                 return default;
 
             case WM_CHAR:

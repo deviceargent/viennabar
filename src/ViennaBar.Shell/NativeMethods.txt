@@ -84,3 +84,10 @@ QueryContextMenu
 InvokeCommand
 GetCommandString
 BHID_SFObject
+SetData
+GlobalAlloc
+GlobalLock
+GlobalUnlock
+GlobalFree
+DROPFILES
+IDropSource
