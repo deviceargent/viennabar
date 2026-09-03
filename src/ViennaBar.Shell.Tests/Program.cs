@@ -525,6 +525,10 @@ internal static class Program
             k?.SetValue("", "old-cmd");
             k?.SetValue("DelegateExecute", "{OLD}");
         }
+        using (var k = hive.CreateSubKey(classes + @"\Directory\shell"))
+        {
+            k?.SetValue("", "none");   // default original estilo Win11
+        }
         string regPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-m1test.reg");
         string summary = ViennaBar.Integration.ApplyM1(hive, classes, backup,
             @"C:\fake\ViennaBar.exe", regPath);
@@ -539,17 +543,30 @@ internal static class Program
         using (var k = hive.OpenSubKey(backup + @"\Directory", false))
             Check(k is not null && (k.GetValue("Existed") as int?) == 1
                 && (k.GetValue("Command") as string) == "old-cmd"
-                && (k.GetValue("DelegateExecute") as string) == "{OLD}", "m1: backup guarda previo");
+                && (k.GetValue("DelegateExecute") as string) == "{OLD}"
+                && (k.GetValue("ShellDefault") as string) == "none", "m1: backup guarda previo");
+        using (var k = hive.OpenSubKey(classes + @"\Directory\shell", false))
+            Check(k is not null && (k.GetValue("") as string) == "open", "m1: shell default -> open");
         string reg = System.IO.File.ReadAllText(regPath);
         Check(reg.Contains("Windows Registry Editor Version 5.00")
             && reg.Contains("@=\"old-cmd\"") && reg.Contains("\"DelegateExecute\"=\"{OLD}\"")
             && reg.Contains("[-HKEY_CURRENT_USER\\" + classes + "\\Drive\\shell\\open\\command]"),
             "m1: rescue .reg");
+        // write-once: segundo apply actualiza el override pero conserva el backup original
+        string summary2 = ViennaBar.Integration.ApplyM1(hive, classes, backup, @"C:\otro\Bar.exe", regPath);
+        Check(summary2.Contains("conservado"), "m1: segundo apply conserva backup");
+        using (var k = hive.OpenSubKey(backup + @"\Directory", false))
+            Check(k is not null && (k.GetValue("Command") as string) == "old-cmd", "m1: backup write-once");
+        using (var k = hive.OpenSubKey(classes + @"\Directory\shell\open\command", false))
+            Check(k is not null && ((k.GetValue("") as string) ?? "").Contains(@"C:\otro\Bar.exe"),
+                "m1: re-apply actualiza command");
         string back = ViennaBar.Integration.RevertM1(hive, classes, backup);
         Check(back.Contains("M1 revertido"), "m1: revert resumen");
         using (var k = hive.OpenSubKey(classes + @"\Directory\shell\open\command", false))
             Check(k is not null && (k.GetValue("") as string) == "old-cmd"
                 && (k.GetValue("DelegateExecute") as string) == "{OLD}", "m1: Directory restaurado");
+        using (var k = hive.OpenSubKey(classes + @"\Directory\shell", false))
+            Check(k is not null && (k.GetValue("") as string) == "none", "m1: shell default restaurado");
         using (var k = hive.OpenSubKey(classes + @"\Drive\shell\open\command", false))
             Check(k is null, "m1: Drive creado se borra");
         Check(hive.OpenSubKey(backup, false) is null, "m1: backup se borra");

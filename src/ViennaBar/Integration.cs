@@ -10,7 +10,8 @@ internal static class Integration
 {
     internal static readonly string[] VerbClasses = ["Directory", "Drive", "Folder"];
 
-    internal sealed record VerbBackup(string Cls, bool Existed, string? Command, string? DelegateExecute);
+    internal sealed record VerbBackup(string Cls, bool Existed, string? Command, string? DelegateExecute,
+        string? ShellDefault);
 
     private static string KeyPath(string classesRoot, string cls) =>
         $"{classesRoot}\\{cls}\\shell\\open\\command";
@@ -21,28 +22,41 @@ internal static class Integration
         foreach (var cls in VerbClasses)
         {
             using var key = hive.OpenSubKey(KeyPath(classesRoot, cls), false);
+            using var shell = hive.OpenSubKey($"{classesRoot}\\{cls}\\shell", false);
             list.Add(new VerbBackup(cls, key is not null,
-                key?.GetValue("") as string, key?.GetValue("DelegateExecute") as string));
+                key?.GetValue("") as string, key?.GetValue("DelegateExecute") as string,
+                shell?.GetValue("") as string));
         }
         return list;
     }
 
     // aplica M1: backup + command="exe --open-folder %V" + borra DelegateExecute.
+    // El backup es WRITE-ONCE: si ya existe (applys previos), se conserva el
+    // original y NO se sobrescribe con el estado ya-overrideado.
     // Devuelve resumen para consola/tests.
     internal static string ApplyM1(RegistryKey hive, string classesRoot, string backupRoot,
         string exePath, string rescueRegPath)
     {
+        using var existing = hive.OpenSubKey(backupRoot, false);
+        bool haveBackup = existing is not null && existing.SubKeyCount > 0;
         var before = ReadVerbs(hive, classesRoot);
-        // backup por clase
-        foreach (var b in before)
+        if (!haveBackup)
         {
-            using var bk = hive.CreateSubKey($"{backupRoot}\\{b.Cls}");
-            if (bk is null) continue;
-            bk.SetValue("Existed", b.Existed ? 1 : 0, RegistryValueKind.DWord);
-            if (b.Command is not null) bk.SetValue("Command", b.Command);
-            else try { bk.DeleteValue("Command", false); } catch { }
-            if (b.DelegateExecute is not null) bk.SetValue("DelegateExecute", b.DelegateExecute);
-            else try { bk.DeleteValue("DelegateExecute", false); } catch { }
+            // backup por clase
+            foreach (var b in before)
+            {
+                using var bk = hive.CreateSubKey($"{backupRoot}\\{b.Cls}");
+                if (bk is null) continue;
+                bk.SetValue("Existed", b.Existed ? 1 : 0, RegistryValueKind.DWord);
+                if (b.Command is not null) bk.SetValue("Command", b.Command);
+                else try { bk.DeleteValue("Command", false); } catch { }
+                if (b.DelegateExecute is not null) bk.SetValue("DelegateExecute", b.DelegateExecute);
+                else try { bk.DeleteValue("DelegateExecute", false); } catch { }
+                if (b.ShellDefault is not null) bk.SetValue("ShellDefault", b.ShellDefault);
+                else try { bk.DeleteValue("ShellDefault", false); } catch { }
+            }
+            try { System.IO.File.WriteAllText(rescueRegPath, BuildRescueReg("HKEY_CURRENT_USER", classesRoot, before)); }
+            catch { }
         }
         string cmd = $"\"{exePath}\" --open-folder \"%V\"";
         foreach (var cls in VerbClasses)
@@ -52,9 +66,15 @@ internal static class Integration
             key.SetValue("", cmd);
             try { key.DeleteValue("DelegateExecute", false); } catch { }
         }
-        try { System.IO.File.WriteAllText(rescueRegPath, BuildRescueReg("HKEY_CURRENT_USER", classesRoot, before)); }
-        catch { }
-        return $"M1 aplicado ({VerbClasses.Length} verbs) backup={backupRoot} rescue={rescueRegPath}";
+        // "none" en Directory/Drive salta la resolucion de shell\open: el
+        // default debe nombrar el verbo para que el override se consulte
+        foreach (var cls in new[] { "Directory", "Drive" })
+        {
+            using var shell = hive.CreateSubKey($"{classesRoot}\\{cls}\\shell");
+            shell?.SetValue("", "open");
+        }
+        string kept = haveBackup ? " (backup original conservado)" : "";
+        return $"M1 aplicado ({VerbClasses.Length} verbs) backup={backupRoot} rescue={rescueRegPath}{kept}";
     }
 
     internal static string RevertM1(RegistryKey hive, string classesRoot, string backupRoot)
@@ -69,7 +89,18 @@ internal static class Integration
             bool existed = (bk.GetValue("Existed") as int?) == 1;
             string? cmd = bk.GetValue("Command") as string;
             string? de = bk.GetValue("DelegateExecute") as string;
+            string? shDef = bk.GetValue("ShellDefault") as string;
             names.Add(cls);
+            // restaurar default de shell (solo Directory/Drive lo tocamos)
+            if (cls == "Directory" || cls == "Drive")
+            {
+                using var shell = hive.CreateSubKey($"{classesRoot}\\{cls}\\shell");
+                if (shell is not null)
+                {
+                    if (shDef is not null) shell.SetValue("", shDef);
+                    else try { shell.DeleteValue("", false); } catch { }
+                }
+            }
             if (!existed)
             {
                 // no existia: borrar lo que creamos + podar padres vacios
@@ -105,7 +136,14 @@ internal static class Integration
         foreach (var b in backups)
         {
             sb.AppendLine();
+            string shellKey = $"{hivePrefix}\\{classesRoot}\\{b.Cls}\\shell";
             string key = $"{hivePrefix}\\{KeyPath(classesRoot, b.Cls)}";
+            if ((b.Cls == "Directory" || b.Cls == "Drive") && b.ShellDefault is not null)
+            {
+                sb.AppendLine($"[{shellKey}]");
+                sb.AppendLine($"@=\"{RegEscape(b.ShellDefault)}\"");
+                sb.AppendLine();
+            }
             if (!b.Existed)
             {
                 sb.AppendLine($"[-{key}]");
