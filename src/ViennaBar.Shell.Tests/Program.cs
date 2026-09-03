@@ -39,6 +39,8 @@ internal static class Program
             if (stage == "widgets") return StageWidgets();
             if (stage == "config") return StageConfig();
             if (stage == "fileop") return StageFileOp();
+            if (stage == "m1") return StageM1();
+            if (stage == "nav") return StageNav();
             if (stage == "headless") return StageHeadless();
 
             Log("stage1: OpenAppsFolder");
@@ -217,6 +219,8 @@ internal static class Program
         if (StageWidgets() != 0) rc = 1;
         if (StageConfig() != 0) rc = 1;
         if (StageFileOp() != 0) rc = 1;
+        if (StageM1() != 0) rc = 1;
+        if (StageNav() != 0) rc = 1;
         Log(rc == 0 ? "=== headless ALL PASS" : "=== headless FAILURES");
         return rc;
     }
@@ -504,5 +508,88 @@ internal static class Program
             "fileop: vacio -> error");
         try { System.IO.Directory.Delete(root, true); } catch { }
         return _failures == 0 ? 0 : 1;
+    }
+
+    private static int StageM1()
+    {
+        _failures = 0;
+        Log("-- m1 (sandbox HKCU, se limpia al final)");
+        string sb = @"Software\ViennaBarTests_M1";
+        string classes = sb + @"\Classes";
+        string backup = sb + @"\Backup";
+        var hive = Microsoft.Win32.Registry.CurrentUser;
+        try { hive.DeleteSubKeyTree(sb, false); } catch { }
+        // seed: Directory con valores previos, Drive/Folder inexistentes
+        using (var k = hive.CreateSubKey(classes + @"\Directory\shell\open\command"))
+        {
+            k?.SetValue("", "old-cmd");
+            k?.SetValue("DelegateExecute", "{OLD}");
+        }
+        string regPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-m1test.reg");
+        string summary = ViennaBar.Integration.ApplyM1(hive, classes, backup,
+            @"C:\fake\ViennaBar.exe", regPath);
+        Check(summary.Contains("M1 aplicado"), "m1: apply resumen");
+        using (var k = hive.OpenSubKey(classes + @"\Directory\shell\open\command", false))
+            Check(k is not null
+                && (k.GetValue("") as string) == "\"C:\\fake\\ViennaBar.exe\" --open-folder \"%V\""
+                && k.GetValue("DelegateExecute") is null, "m1: Directory override + DE borrado");
+        using (var k = hive.OpenSubKey(classes + @"\Drive\shell\open\command", false))
+            Check(k is not null && ((k.GetValue("") as string) ?? "").Contains("--open-folder"),
+                "m1: Drive creado");
+        using (var k = hive.OpenSubKey(backup + @"\Directory", false))
+            Check(k is not null && (k.GetValue("Existed") as int?) == 1
+                && (k.GetValue("Command") as string) == "old-cmd"
+                && (k.GetValue("DelegateExecute") as string) == "{OLD}", "m1: backup guarda previo");
+        string reg = System.IO.File.ReadAllText(regPath);
+        Check(reg.Contains("Windows Registry Editor Version 5.00")
+            && reg.Contains("@=\"old-cmd\"") && reg.Contains("\"DelegateExecute\"=\"{OLD}\"")
+            && reg.Contains("[-HKEY_CURRENT_USER\\" + classes + "\\Drive\\shell\\open\\command]"),
+            "m1: rescue .reg");
+        string back = ViennaBar.Integration.RevertM1(hive, classes, backup);
+        Check(back.Contains("M1 revertido"), "m1: revert resumen");
+        using (var k = hive.OpenSubKey(classes + @"\Directory\shell\open\command", false))
+            Check(k is not null && (k.GetValue("") as string) == "old-cmd"
+                && (k.GetValue("DelegateExecute") as string) == "{OLD}", "m1: Directory restaurado");
+        using (var k = hive.OpenSubKey(classes + @"\Drive\shell\open\command", false))
+            Check(k is null, "m1: Drive creado se borra");
+        Check(hive.OpenSubKey(backup, false) is null, "m1: backup se borra");
+        Check(ViennaBar.Integration.RevertM1(hive, classes, backup).Contains("nada que revertir"),
+            "m1: revert sin backup");
+        try { hive.DeleteSubKeyTree(sb, false); } catch { }
+        try { System.IO.File.Delete(regPath); } catch { }
+        return _failures == 0 ? 0 : 1;
+    }
+
+    private static int StageNav()
+    {
+        _failures = 0;
+        Log("-- nav");
+        var tree = new ViennaBar.ShellTree();
+        tree.Attach(default);
+        string sub = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-navtest", "sub");
+        System.IO.Directory.CreateDirectory(sub);
+        tree.ExpandToPath(sub);
+        Check(FindNode(tree.Roots, sub) is not null, "nav: nodo destino en el tree");
+        try
+        {
+            tree.ExpandToPath(@"C:\definitivamente-no-existe-xyz");
+            Check(true, "nav: ruta mala no explota");
+        }
+        catch (Exception ex) { Check(false, "nav: ruta mala no explota (" + ex.GetType().Name + ")"); }
+        try { System.IO.Directory.Delete(System.IO.Path.GetDirectoryName(sub)!, true); } catch { }
+        tree.Dispose();
+        return _failures == 0 ? 0 : 1;
+    }
+
+    private static ViennaBar.ShellTree.TreeNode? FindNode(List<ViennaBar.ShellTree.TreeNode> list, string parsing)
+    {
+        foreach (var n in list)
+        {
+            if (n.ParsingName.TrimEnd('\\').Equals(parsing.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+                return n;
+            var d = FindNode(n.Children, parsing);
+            if (d is not null) return d;
+        }
+        return null;
     }
 }

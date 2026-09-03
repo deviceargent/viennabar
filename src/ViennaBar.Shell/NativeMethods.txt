@@ -31,6 +31,9 @@ ILClone
 ILGetSize
 SHChangeNotifyRegister
 SHChangeNotifyDeregister
+SHChangeNotify
+SHCNE_ID
+SHCNF_FLAGS
 SHChangeNotifyEntry
 SHCNRF_SOURCE
 SHCNE_NONE

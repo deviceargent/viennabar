@@ -165,6 +165,45 @@ internal sealed class ShellTree : IDisposable
 
     internal TreeNode? HitTestNode(int y, int width, int height) => HitTest(y, width, height);
 
+    // M1 --open-folder: expande la cadena hasta la carpeta (lo que exista).
+    // 1) raiz FS directa (Escritorio/Descargas/Documentos) 2) via Este equipo.
+    internal void ExpandToPath(string fullPath)
+    {
+        string path;
+        try { path = Path.GetFullPath(fullPath).TrimEnd('\\'); }
+        catch { return; }
+        foreach (var r in Roots)
+        {
+            if (r.ParsingName.StartsWith("::{")) continue;
+            string rd = r.ParsingName.TrimEnd('\\');
+            if (path.Equals(rd, StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith(rd + "\\", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!r.Expanded) Expand(r);
+                App.Instance?.Invalidate();
+                return;
+            }
+        }
+        var pc = Roots.Find(r => r.ParsingName.StartsWith("::{20D04FE0"));
+        if (pc is null) return;
+        if (!pc.Expanded) Expand(pc);
+        string drive = (Path.GetPathRoot(path) ?? "").TrimEnd('\\');   // "C:"
+        if (drive.Length == 0) return;
+        var node = pc.Children.Find(c => c.IsFolder
+            && c.ParsingName.TrimEnd('\\').Equals(drive, StringComparison.OrdinalIgnoreCase));
+        if (node is null) return;
+        string rest = path.Length > drive.Length ? path[(drive.Length + 1)..] : "";
+        foreach (var seg in rest.Split('\\', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!node.Expanded) Expand(node);
+            var next = node.Children.Find(c => c.IsFolder
+                && c.Name.Equals(seg, StringComparison.OrdinalIgnoreCase));
+            if (next is null) break;
+            node = next;
+        }
+        App.Instance?.Invalidate();
+    }
+
     private TreeNode? HitTest(int y, int width, int height)
     {
         const float rowH = 18f;

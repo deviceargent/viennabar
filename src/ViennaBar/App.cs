@@ -53,12 +53,31 @@ internal sealed unsafe class App : IDisposable
         _ = OleInitialize();
         _ = CoInitialize(default);
 
-        // ProtocolRouter stub: --open-folder <path> (M1 lo invocará)
-        if (args.Length >= 2 && args[0] == "--open-folder")
+        // F3/M1: aplicar/revertir override de verbs (sin ventana)
+        if (args.Length >= 1 && args[0] == "--m1-apply")
         {
-            Console.WriteLine($"vienna://folder?path={Uri.EscapeDataString(args[1])}");
+            Console.WriteLine(Integration.ApplyM1(Microsoft.Win32.Registry.CurrentUser,
+                @"Software\Classes", @"Software\ViennaBar\M1Backup",
+                Environment.ProcessPath ?? "ViennaBar.exe", DesktopRescuePath()));
+            Shell.NotifyAssocChanged();
             return 0;
         }
+        if (args.Length >= 1 && args[0] == "--m1-revert")
+        {
+            Console.WriteLine(Integration.RevertM1(Microsoft.Win32.Registry.CurrentUser,
+                @"Software\Classes", @"Software\ViennaBar\M1Backup"));
+            Shell.NotifyAssocChanged();
+            return 0;
+        }
+
+        // ProtocolRouter: --open-folder <path> (M1 lo invoca por doble-click)
+        if (args.Length >= 2 && args[0] == "--open-folder")
+        {
+            // instancia viva? reenviar y salir
+            if (SingleInstance.ForwardOpenFolder(args[1])) return 0;
+            s_pendingOpenFolder = args[1];   // primario: arrancar y navegar
+        }
+        if (!SingleInstance.Acquire()) return 0;
 
         _ = Config.LoadDefault();   // settings + hot-reload watcher (antes que Skin)
         _ = Skin.LoadDefault();   // tokens + hot-reload watcher
@@ -68,6 +87,11 @@ internal sealed unsafe class App : IDisposable
         Instance = app;
         return app.MessageLoop();
     }
+
+    private static string? s_pendingOpenFolder;
+
+    private static string DesktopRescuePath() => System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "ViennaBar-M1-revert.reg");
 
     // hot-reload de skin: recrea brushes con tokens nuevos y repinta
     internal void ReloadSkin(Skin skin)
@@ -156,6 +180,14 @@ internal sealed unsafe class App : IDisposable
         _tree.Attach(_hwnd);
         AppLog("tree attached");
         _drop = new DropEngine(_tree);
+        // M1: arranque via --open-folder sin instancia previa: revelar y navegar
+        if (s_pendingOpenFolder is not null)
+        {
+            SetPos(FullWidthPx, hidden: false);
+            _tree.ExpandToPath(s_pendingOpenFolder);
+            AppLog($"open-folder: {s_pendingOpenFolder}");
+            s_pendingOpenFolder = null;
+        }
         _drop.Attach(_hwnd);
         AppLog("drop attached");
         _drawer.Attach(_hwnd);
@@ -487,6 +519,20 @@ internal sealed unsafe class App : IDisposable
                 var pd = _pendingDrop;
                 _pendingDrop = null;
                 if (pd is not null) ShowDropMenu(pd.Value.paths, pd.Value.dest);
+                return default;
+            }
+
+            case 0x004A: // WM_COPYDATA: --open-folder de una segunda instancia
+            {
+                var cds = (SingleInstance.CopyDataMsg*)(void*)lparam.Value;
+                if (cds->dwData == 1 && cds->cbData >= 2)
+                {
+                    string path = new string((char*)cds->lpData, 0, (int)(cds->cbData / 2)).TrimEnd('\0');
+                    AppLog($"open-folder: {path}");
+                    SetPos(FullWidthPx, hidden: false);
+                    if (path.Length > 0) _tree.ExpandToPath(path);
+                    Invalidate();
+                }
                 return default;
             }
 

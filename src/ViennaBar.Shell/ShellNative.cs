@@ -378,6 +378,14 @@ internal static unsafe class ShellNative
         if (folderHandle != 0) _ = ((IShellFolder*)folderHandle)->Release();
     }
 
+    // avisa al shell que los verbs/asociaciones cambiaron (obligatorio tras
+    // Apply/Revert M1: sin esto Explorer sigue usando la cache)
+    public static void NotifyAssocChanged()
+    {
+        try { SHChangeNotify(SHCNE_ID.SHCNE_ASSOCCHANGED, SHCNF_FLAGS.SHCNF_IDLIST, null, null); }
+        catch { }
+    }
+
     public static nint OpenAppsFolder()
     {
         // ruta S4 validada: known folder item → BindToHandler(BHID_SFObject)

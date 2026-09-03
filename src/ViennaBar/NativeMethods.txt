@@ -113,6 +113,7 @@ GetUIObjectOf
 SHGetPathFromIDList
 WindowFromPoint
 ChildWindowFromPointEx
+FindWindow
 GetAncestor
 SetForegroundWindow
 GetForegroundWindow

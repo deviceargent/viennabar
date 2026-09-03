@@ -74,18 +74,15 @@ internal sealed class Widgets : IDisposable
         // reloj grande (arriba)
         ctx.Text(_clock, AppText.FmtBig, Skin.Text, 12, 8, w - 20, 26);
 
-        // CPU / RAM barras minimal
+        // CPU / RAM barras minimal (% integrado en el label: sin linea
+        // numerica aparte, que se leia como widget duplicado)
         float by = 40;
-        ctx.Text("CPU", AppText.Fmt, Skin.Muted, 12, by, 30, 14);
-        DrawBar(ctx, 46, by + 2, w - 58, 10, _cpuPct / 100.0);
+        ctx.Text($"CPU {_cpuPct:0}%", AppText.Fmt, Skin.Muted, 12, by, 64, 14);
+        DrawBar(ctx, 78, by + 2, w - 90, 10, _cpuPct / 100.0);
         by += 20;
-        ctx.Text("RAM", AppText.Fmt, Skin.Muted, 12, by, 30, 14);
-        DrawBar(ctx, 46, by + 2, w - 58, 10, _ramPct / 100.0);
-
-        // lectura numérica
-        by += 22;
-        ctx.Text($"CPU {_cpuPct:0}%   RAM {_ramPct:0}%", AppText.Fmt, Skin.Muted, 12, by, w - 20, 14);
-        by += 18;
+        ctx.Text($"RAM {_ramPct:0}%", AppText.Fmt, Skin.Muted, 12, by, 64, 14);
+        DrawBar(ctx, 78, by + 2, w - 90, 10, _ramPct / 100.0);
+        by += 20;
 
         // ---- discos fijos: una fila compacta por unidad (label + barra uso) ----
         foreach (var d in _disks)
