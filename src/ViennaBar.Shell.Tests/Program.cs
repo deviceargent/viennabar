@@ -652,6 +652,17 @@ internal static class Program
             == ViennaBar.Launcher.TargetKind.Passthrough, "launcher: inexistente -> Passthrough");
         Check(ViennaBar.Launcher.Launcher.QuoteArgs(["a", "b c", "d\"e"]) == "a \"b c\" \"d\\\"e\"",
             "launcher: QuoteArgs");
+        // IFEO antepone la imagen original: se quita antes de clasificar
+        Check(ViennaBar.Launcher.Launcher.StripImageName([]).Length == 0, "launcher: strip vacio");
+        Check(ViennaBar.Launcher.Launcher.StripImageName(["explorer.exe"]).Length == 0
+            && ViennaBar.Launcher.Launcher.Classify(
+                ViennaBar.Launcher.Launcher.StripImageName(["explorer.exe"])).Kind
+                == ViennaBar.Launcher.TargetKind.Reveal, "launcher: strip Win+E -> Reveal");
+        Check(ViennaBar.Launcher.Launcher.Classify(
+                ViennaBar.Launcher.Launcher.StripImageName(["explorer.exe", sub])).Kind
+            == ViennaBar.Launcher.TargetKind.Folder, "launcher: strip + carpeta -> Folder");
+        Check(ViennaBar.Launcher.Launcher.StripImageName([@"C:\Windows\explorer.exe", "/e"])[0] == "/e",
+            "launcher: strip path completo");
         try { System.IO.Directory.Delete(dir, true); } catch { }
         return _failures == 0 ? 0 : 1;
     }

@@ -14,6 +14,10 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        // IFEO antepone el nombre de imagen original (explorer.exe) a los
+        // args reales: hay que quitarlo o todo clasifica mal (todo iba a
+        // Passthrough y abria el Explorer de verdad).
+        args = Launcher.StripImageName(args);
         var t = Launcher.Classify(args);
         string dir = AppDir();
         return t.Kind switch
@@ -34,6 +38,18 @@ internal sealed record Target(TargetKind Kind, string? Path);
 
 internal static unsafe class Launcher
 {
+    // quita el argv[0] que IFEO hereda (nombre/etiqueta de la imagen
+    // original). Testeable y puro.
+    internal static string[] StripImageName(string[] args)
+    {
+        if (args.Length == 0) return args;
+        string a0 = args[0];
+        if (a0.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase)
+            || a0.EndsWith(@"\explorer.exe", StringComparison.OrdinalIgnoreCase))
+            return args[1..];
+        return args;
+    }
+
     internal static Target Classify(string[] args)
     {
         if (args.Length == 0) return new(TargetKind.Reveal, null);
