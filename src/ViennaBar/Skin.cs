@@ -32,30 +32,38 @@ internal sealed class Skin : IDisposable
 
     private static readonly string SkinDir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ViennaBar");
-    private static readonly string SkinPath = Path.Combine(SkinDir, "skin.json");
 
     private FileSystemWatcher? _watcher;
+    private string _path = "";
 
     public static Skin LoadDefault()
     {
-        Current = LoadFromPath(SkinPath);
+        var old = Current;
+        Current = LoadFromPath(ResolveSkinPath(Config.Current.Skin, SkinDir));
         Current.Watch();
+        try { old.Dispose(); } catch { }   // watcher del skin anterior (si hubo switch)
         return Current;
+    }
+
+    // packaging: skins/<nombre>/skin.json, fallback al legacy skin.json.
+    // Si no existe ninguno, devuelve la ruta empaquetada (crear el archivo
+    // despues dispara el hot-reload). Testeable headless.
+    internal static string ResolveSkinPath(string skinName, string appDir)
+    {
+        string packaged = Path.Combine(appDir, "skins", skinName, "skin.json");
+        if (File.Exists(packaged)) return packaged;
+        string legacy = Path.Combine(appDir, "skin.json");
+        if (File.Exists(legacy)) return legacy;
+        return packaged;
     }
 
     // parseo sin watcher: testeable headless (los tests usan un path temporal
     // y no tocan el skin.json real del usuario)
     internal static Skin LoadFromPath(string path)
     {
-        var skin = new Skin();
+        var skin = new Skin { _path = path };
         skin.LoadFromDisk(path);
         return skin;
-    }
-
-    private void Init()
-    {
-        LoadFromDisk(SkinPath);
-        Watch();
     }
 
     private void LoadFromDisk(string path)
@@ -96,10 +104,13 @@ internal sealed class Skin : IDisposable
 
     private void Watch()
     {
+        string? dir = null;
+        try { dir = Path.GetDirectoryName(_path); } catch { }
+        if (string.IsNullOrEmpty(dir)) dir = SkinDir;
         try
         {
-            Directory.CreateDirectory(SkinDir);
-            _watcher = new FileSystemWatcher(SkinDir, "skin.json")
+            Directory.CreateDirectory(dir);
+            _watcher = new FileSystemWatcher(dir, "skin.json")
             {
                 NotifyFilter = NotifyFilters.LastWrite,
                 EnableRaisingEvents = true,
@@ -107,7 +118,7 @@ internal sealed class Skin : IDisposable
             _watcher.Changed += (_, _) =>
             {
                 Thread.Sleep(150);            // el editor escribe en varios pasos
-                LoadFromDisk(SkinPath);
+                LoadFromDisk(_path);
                 // refresco de brushes + repaint desde el hilo UI
                 App.Instance?.ReloadSkin(this);
             };

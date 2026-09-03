@@ -57,14 +57,23 @@ internal sealed class DropEngine : ViennaBar.ShellNative.DropTargetCcw, IDisposa
     {
         App.Instance?.SetDragActive(false);
         var paths = ViennaBar.ShellNative.ShellNative.PathsFromDataObject(dataObj);
+        // COPY optimista: el deferral (menu Mover/Copiar/Apilar) ejecuta la
+        // operacion real despues; si el usuario apila o cancela, el origen
+        // conserva los archivos — consistente en todos los casos.
+        if (effect is not null) *effect = 1;
+        if (paths.Count > 0)
+            App.Instance?.DeferDrop(paths, pt.X, pt.Y);
+        return 0;
+    }
+
+    internal void StackPaths(List<string> paths)
+    {
         foreach (var p in paths) DropStack.Add(p);
         if (paths.Count > 0)
         {
             App.AppLog($"[drop] +{paths.Count} al stack (total {DropStack.Count}): {paths[0]}");
             App.Instance?.Invalidate();
         }
-        if (effect is not null) *effect = 1;
-        return 0;
     }
 
     public new void Dispose()

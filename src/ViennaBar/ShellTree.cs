@@ -163,6 +163,8 @@ internal sealed class ShellTree : IDisposable
         }
     }
 
+    internal TreeNode? HitTestNode(int y, int width, int height) => HitTest(y, width, height);
+
     private TreeNode? HitTest(int y, int width, int height)
     {
         const float rowH = 18f;

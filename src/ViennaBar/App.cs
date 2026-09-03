@@ -7,6 +7,7 @@ using Windows.Win32.UI.Input.KeyboardAndMouse;
 using Windows.Win32.UI.Shell;
 using Windows.Win32.UI.WindowsAndMessaging;
 using static Windows.Win32.PInvoke;
+using Shell = ViennaBar.ShellNative.ShellNative;
 
 namespace ViennaBar;
 
@@ -59,6 +60,7 @@ internal sealed unsafe class App : IDisposable
             return 0;
         }
 
+        _ = Config.LoadDefault();   // settings + hot-reload watcher (antes que Skin)
         _ = Skin.LoadDefault();   // tokens + hot-reload watcher
         var tree = new ShellTree();
         var drawer = new Drawer();
@@ -74,6 +76,15 @@ internal sealed unsafe class App : IDisposable
         if (_hwnd != default)
         {
             _ = PostMessage(_hwnd, WM_APP + 2, 0, 0); // WM_APP+2 = reload skin
+        }
+    }
+
+    // aplicar config editado a mano: re-lee geometría en el hilo UI
+    internal void RequestConfigApply()
+    {
+        if (_hwnd != default)
+        {
+            _ = PostMessage(_hwnd, WM_APP + 3, 0, 0); // WM_APP+3 = apply config
         }
     }
 
@@ -229,6 +240,59 @@ internal sealed unsafe class App : IDisposable
         return pt.X >= r.left && pt.X < r.right && pt.Y >= r.top && pt.Y < r.bottom;
     }
 
+    // ---- drop deferral: soltar sobre carpeta del tree pregunta que hacer ----
+    private (List<string> paths, string dest)? _pendingDrop;
+
+    // pt en coords de pantalla (las que entrega OLE). Si cae sobre una
+    // carpeta del tree: stash + menu async. Si no: apila como antes.
+    internal void DeferDrop(List<string> paths, int screenX, int screenY)
+    {
+        var pt = new System.Drawing.Point(screenX, screenY);
+        _ = ScreenToClient(_hwnd, ref pt);
+        if (pt.Y >= WidgetsH && pt.Y < WidgetsH + TreeH)
+        {
+            var node = _tree.HitTestNode(pt.Y - WidgetsH, FullWidthPx, TreeH);
+            if (node is not null && node.IsFolder && node.ParsingName.Length > 0)
+            {
+                AppLog($"defer: {paths.Count} sobre carpeta {node.Name}");
+                _pendingDrop = (paths, node.ParsingName);
+                _ = PostMessage(_hwnd, WM_APP + 4, 0, 0); // WM_APP+4 = drop menu
+                return;
+            }
+        }
+        _drop.StackPaths(paths);
+    }
+
+    private void ShowDropMenu(List<string> paths, string dest)
+    {
+        var hmenu = CreatePopupMenu();
+        fixed (char* m1 = "Mover aquí", m2 = "Copiar aquí", m3 = "Apilar")
+        {
+            _ = AppendMenu(hmenu, default, 1, m1);
+            _ = AppendMenu(hmenu, default, 2, m2);
+            _ = AppendMenu(hmenu, default, 3, m3);
+        }
+        _ = GetCursorPos(out var pt);
+        int cmd = TrackPopupMenu(hmenu,
+            TRACK_POPUP_MENU_FLAGS.TPM_RETURNCMD | TRACK_POPUP_MENU_FLAGS.TPM_RIGHTBUTTON,
+            pt.X, pt.Y, 0, _hwnd, null);
+        _ = DestroyMenu(hmenu);
+        if (cmd == 1 || cmd == 2)
+        {
+            // UI de progreso del shell + deshacer (ALLOWUNDO); el tree se
+            // refresca solo via SHChangeNotify
+            int rc = Shell.FileOperation((nint)_hwnd.Value, cmd == 1 ? Shell.FO_MOVE : Shell.FO_COPY,
+                paths, dest, Shell.FOF_ALLOWUNDO);
+            AppLog($"dropmenu: cmd={cmd} dest={dest} rc=0x{rc:X}");
+        }
+        else if (cmd == 3)
+        {
+            _drop.StackPaths(paths);
+        }
+        else AppLog("dropmenu: cancelado");
+        Invalidate();
+    }
+
     // ---- drag-out del Drop Stack ----
     private int _pressIdx = -1;                 // item del stack con boton izq abajo
     private (int, int) _pressPt;
@@ -282,6 +346,12 @@ internal sealed unsafe class App : IDisposable
         else if (y >= WidgetsH)
         {
             _tree.OnClick(x, y - WidgetsH, FullWidthPx, TreeH);
+        }
+        else
+        {
+            // tercio widgets: click en linea del clip = restaurar al portapapeles
+            int ci = _widgets.ClipHitTest(y);
+            if (ci >= 0) _widgets.RestoreClip(ci);
         }
     }
 
@@ -406,6 +476,20 @@ internal sealed unsafe class App : IDisposable
                 }
                 return default;
 
+            case WM_CLIPBOARDUPDATE:
+                _widgets.OnClipboardUpdate();
+                return default;
+
+            case WM_APP + 4:
+            {
+                // drop deferral: menu Mover/Copiar/Apilar (paths ya extraidos
+                // en el OnDrop; el IDataObject* original ya no es valido aqui)
+                var pd = _pendingDrop;
+                _pendingDrop = null;
+                if (pd is not null) ShowDropMenu(pd.Value.paths, pd.Value.dest);
+                return default;
+            }
+
             case WM_CAPTURECHANGED:
                 // perdida de capture ajena (p.ej. ventana popup): cancelar press
                 _pressIdx = -1;
@@ -446,6 +530,15 @@ internal sealed unsafe class App : IDisposable
             case WM_APP + 2:
                 // hot-reload skin: recrea brushes con tokens nuevos y repinta
                 _renderer.ReloadBrushes(_hwnd, 0, 0);
+                Invalidate();
+                return default;
+
+            case WM_APP + 3:
+                // hot-reload config: re-resuelve skin (pudo cambiar "skin"),
+                // re-aplica geometría actual y repinta
+                Skin.LoadDefault();
+                _renderer.ReloadBrushes(_hwnd, 0, 0);
+                SetPos(_hidden ? SliverPx : FullWidthPx, _hidden);
                 Invalidate();
                 return default;
 

@@ -493,6 +493,77 @@ internal static unsafe class ShellNative
         if (dataObj != 0) _ = ((Windows.Win32.System.Com.IUnknown*)dataObj)->Release();
     }
 
+    // =============== drop deferral: mover/copiar via SHFileOperationW ===============
+    // P/Invoke crudo (la struct lleva char*): el IDataObject ya se parseo a
+    // paths en el OnDrop, asi que el deferral trabaja con strings.
+    public const uint FO_MOVE = 1;
+    public const uint FO_COPY = 2;
+    public const ushort FOF_ALLOWUNDO = 0x40;
+    public const ushort FOF_SILENT = 0x4;
+    public const ushort FOF_NOCONFIRMATION = 0x10;
+    public const ushort FOF_NOERRORUI = 0x400;
+    public const ushort FOF_NOCONFIRMMKDIR = 0x200;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private unsafe struct SHFILEOPSTRUCTW
+    {
+        public nint hwnd;
+        public uint wFunc;
+        public char* pFrom;
+        public char* pTo;
+        public ushort fFlags;
+        public int fAnyOperationsAborted;
+        public void* hNameMappings;
+        public char* lpszProgressTitle;
+    }
+
+    [DllImport("shell32.dll", EntryPoint = "SHFileOperationW", CharSet = CharSet.Unicode)]
+    private static extern int SHFileOperationRaw(SHFILEOPSTRUCTW* op);
+
+    private static nint AllocMultiString(IList<string> items)
+    {
+        int chars = 1;
+        foreach (var s in items) chars += s.Length + 1;
+        nint mem = Marshal.AllocHGlobal(chars * 2);
+        unsafe
+        {
+            char* d = (char*)mem;
+            foreach (var s in items)
+            {
+                foreach (char c in s) *d++ = c;
+                *d++ = '\0';
+            }
+            *d = '\0';
+        }
+        return mem;
+    }
+
+    // Mueve/copia fromPaths a toDir. flags=0 + hwnd real = UI de progreso
+    // del shell (deshacer incluido con ALLOWUNDO). Devuelve 0 = ok.
+    public static unsafe int FileOperation(nint hwndParent, uint func, IList<string> fromPaths, string toDir, ushort flags)
+    {
+        if (fromPaths.Count == 0 || toDir.Length == 0) return -1;
+        nint from = AllocMultiString(fromPaths);
+        nint to = AllocMultiString(new[] { toDir });
+        try
+        {
+            var op = new SHFILEOPSTRUCTW
+            {
+                hwnd = hwndParent,
+                wFunc = func,
+                pFrom = (char*)from,
+                pTo = (char*)to,
+                fFlags = flags,
+            };
+            return SHFileOperationRaw(&op);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(from);
+            Marshal.FreeHGlobal(to);
+        }
+    }
+
     // test AOT del paso QueryContextMenu aislado (bisect del hang F2.1b):
     // GetUIObjectOf(IContextMenu) + QueryContextMenu + DestroyMenu. Sin Track.
     public static string DebugTestQueryContextMenu(IShellFolder* parentFolder, byte[] childPidl)

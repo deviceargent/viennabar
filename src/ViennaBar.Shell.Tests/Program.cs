@@ -36,6 +36,9 @@ internal static class Program
             if (stage == "skin") return StageSkin();
             if (stage == "cache") return StageCache();
             if (stage == "log") return StageLog();
+            if (stage == "widgets") return StageWidgets();
+            if (stage == "config") return StageConfig();
+            if (stage == "fileop") return StageFileOp();
             if (stage == "headless") return StageHeadless();
 
             Log("stage1: OpenAppsFolder");
@@ -211,6 +214,9 @@ internal static class Program
         if (StageSkin() != 0) rc = 1;
         if (StageCache() != 0) rc = 1;
         if (StageLog() != 0) rc = 1;
+        if (StageWidgets() != 0) rc = 1;
+        if (StageConfig() != 0) rc = 1;
+        if (StageFileOp() != 0) rc = 1;
         Log(rc == 0 ? "=== headless ALL PASS" : "=== headless FAILURES");
         return rc;
     }
@@ -341,6 +347,21 @@ internal static class Program
         var missing = ViennaBar.Skin.LoadFromPath(path);
         var mspec = missing.CacheBrushSpec.ToDictionary(t => t.Item1, t => t.Item2);
         Check(mspec["bg"] == unchecked((int)0xFFE8F0F7), "skin: sin archivo -> defaults");
+        // packaging: skins/<nombre>/ > legacy > ruta empaquetada (para crear)
+        string appDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-skintest");
+        string night = System.IO.Path.Combine(appDir, "skins", "noche", "skin.json");
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(night)!);
+        System.IO.File.WriteAllText(night, "{\"background\":\"#000001\"}");
+        Check(ViennaBar.Skin.ResolveSkinPath("noche", appDir) == night, "skin: resuelve empaquetado");
+        System.IO.File.Delete(night);
+        Check(ViennaBar.Skin.ResolveSkinPath("noche", appDir) == night, "skin: sin legacy -> ruta empaquetada");
+        System.IO.File.WriteAllText(path, "{\"background\":\"#000002\"}");
+        Check(ViennaBar.Skin.ResolveSkinPath("noche", appDir) == path, "skin: fallback legacy");
+        var viaLegacy = ViennaBar.Skin.LoadFromPath(ViennaBar.Skin.ResolveSkinPath("noche", appDir));
+        Check(viaLegacy.CacheBrushSpec.ToDictionary(t => t.Item1, t => t.Item2)["bg"] == unchecked((int)0xFF000002),
+            "skin: carga via fallback");
+        System.IO.File.Delete(path);
+        Check(ViennaBar.Skin.ResolveSkinPath("noche", appDir) == night, "skin: sin ninguno -> ruta empaquetada");
         return _failures == 0 ? 0 : 1;
     }
 
@@ -396,6 +417,92 @@ internal static class Program
             prev = n;
         }
         Check(ordered, "log: ring ordenado y contiguo");
+        return _failures == 0 ? 0 : 1;
+    }
+
+    private static int StageWidgets()
+    {
+        _failures = 0;
+        Log("-- widgets");
+        Check(ViennaBar.Widgets.FormatGb(0) == "0 GB", "widgets: 0B");
+        Check(ViennaBar.Widgets.FormatGb(1073741824) == "1 GB", "widgets: 1GiB");
+        Check(ViennaBar.Widgets.FormatGb(123456789012) == "115 GB", "widgets: 115GiB");
+        var w = new ViennaBar.Widgets();
+        w.PushClip("  hola  ");
+        w.PushClip("mundo");
+        w.PushClip("hola");   // dedup: mueve al frente
+        Check(w.Clips.Count == 2 && w.Clips[0] == "hola" && w.Clips[1] == "mundo", "widgets: push+dedup");
+        w.PushClip("   ");
+        Check(w.Clips.Count == 2, "widgets: vacio ignorado");
+        for (int i = 0; i < 10; i++) w.PushClip($"c{i}");
+        Check(w.Clips.Count == 5 && w.Clips[0] == "c9" && w.Clips[4] == "c5", "widgets: tope 5");
+        w.SampleDisks();   // syscalls reales de solo lectura
+        Check(w.Disks.Count > 0, $"widgets: discos={w.Disks.Count}");
+        bool sane = true;
+        foreach (var d in w.Disks) if (d.usedFrac < 0 || d.usedFrac > 1 || d.label.Length < 2) sane = false;
+        Check(sane, "widgets: fracs en rango");
+        w.Dispose();
+        return _failures == 0 ? 0 : 1;
+    }
+
+    private static int StageConfig()
+    {
+        _failures = 0;
+        Log("-- config");
+        string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-configtest");
+        System.IO.Directory.CreateDirectory(dir);
+        string path = System.IO.Path.Combine(dir, "config.json");
+        System.IO.File.WriteAllText(path,
+            "{\"width\":320,\"revealMs\":50,\"hideMs\":500,\"skin\":\"noche\"}");
+        var c = ViennaBar.Config.LoadFromPath(path);
+        Check(c.Width == 320 && c.RevealMs == 50 && c.HideMs == 500 && c.Skin == "noche", "config: parse");
+        System.IO.File.WriteAllText(path, "{\"width\":9999,\"revealMs\":-5,\"skin\":\"..\\\\evil\"}");
+        var clamped = ViennaBar.Config.LoadFromPath(path);
+        Check(clamped.Width == 600 && clamped.RevealMs == 0 && clamped.Skin == "evil", "config: clamp+sanitize");
+        System.IO.File.WriteAllText(path, "{roto");
+        var broken = ViennaBar.Config.LoadFromPath(path);
+        Check(broken.Width == 280 && broken.Skin == "default", "config: roto -> defaults");
+        System.IO.File.Delete(path);
+        var missing = ViennaBar.Config.LoadFromPath(path);
+        Check(missing.Width == 280 && missing.HideMs == 400, "config: sin archivo -> defaults");
+        return _failures == 0 ? 0 : 1;
+    }
+
+    private static int StageFileOp()
+    {
+        _failures = 0;
+        Log("-- fileop");
+        const ushort silent = (ushort)(ViennaBar.ShellNative.ShellNative.FOF_SILENT
+            | ViennaBar.ShellNative.ShellNative.FOF_NOCONFIRMATION
+            | ViennaBar.ShellNative.ShellNative.FOF_NOERRORUI
+            | ViennaBar.ShellNative.ShellNative.FOF_NOCONFIRMMKDIR);
+        string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-fileoptest");
+        string src = System.IO.Path.Combine(root, "src");
+        string dst = System.IO.Path.Combine(root, "dst");
+        try { System.IO.Directory.Delete(root, true); } catch { }
+        System.IO.Directory.CreateDirectory(src);
+        System.IO.Directory.CreateDirectory(dst);
+        string a = System.IO.Path.Combine(src, "a.txt");
+        string b = System.IO.Path.Combine(src, "b con espacios.txt");
+        System.IO.File.WriteAllText(a, "a");
+        System.IO.File.WriteAllText(b, "b");
+        // copiar 2 archivos de una vez (buffer multi-string) sin UI
+        int rc = Shell.FileOperation(0, Shell.FO_COPY, new List<string> { a, b }, dst, silent);
+        Check(rc == 0, $"fileop: copy rc=0x{rc:X}");
+        Check(System.IO.File.Exists(System.IO.Path.Combine(dst, "a.txt"))
+            && System.IO.File.Exists(System.IO.Path.Combine(dst, "b con espacios.txt"))
+            && System.IO.File.Exists(a), "fileop: copia existe en ambos");
+        // mover: sale del origen
+        string dst2 = System.IO.Path.Combine(root, "dst2");
+        System.IO.Directory.CreateDirectory(dst2);
+        rc = Shell.FileOperation(0, Shell.FO_MOVE,
+            new List<string> { System.IO.Path.Combine(dst, "a.txt") }, dst2, silent);
+        Check(rc == 0, $"fileop: move rc=0x{rc:X}");
+        Check(System.IO.File.Exists(System.IO.Path.Combine(dst2, "a.txt"))
+            && !System.IO.File.Exists(System.IO.Path.Combine(dst, "a.txt")), "fileop: move reubica");
+        Check(Shell.FileOperation(0, Shell.FO_COPY, new List<string>(), dst, silent) != 0,
+            "fileop: vacio -> error");
+        try { System.IO.Directory.Delete(root, true); } catch { }
         return _failures == 0 ? 0 : 1;
     }
 }
