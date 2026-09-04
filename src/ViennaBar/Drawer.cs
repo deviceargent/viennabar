@@ -106,6 +106,18 @@ internal sealed class Drawer
 
     private int VisibleRows => Math.Max(1, (int)((_drawerAreaH - SearchH - StartBtnH - 12) / RowH));
 
+    // scroll con ruedita (misma _topRow que el teclado)
+    internal void ScrollBy(int lines)
+    {
+        int max = Math.Max(0, CurrentResults().Count - VisibleRows);
+        int next = Math.Clamp(_topRow + lines, 0, max);
+        if (next != _topRow)
+        {
+            _topRow = next;
+            App.Instance?.Invalidate();
+        }
+    }
+
     // click dentro del Ã¡rea del drawer (coords locales al drawer).
     // Layout: search box [0..SearchH] | filas desde SearchH+2 (calza con Render).
     public void OnClick(int x, int y, int drawerH)
