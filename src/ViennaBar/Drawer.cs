@@ -248,7 +248,7 @@ internal sealed class Drawer
         ctx.Text(header, FBig, _dragOver ? Skin.Text : Skin.Muted, x + 10, y + 4, w - 20, 18);
 
         float gy = y + 24;
-        _dropGridY = gy;
+        _dropGridY = gy - y;   // drawer-LOCAL (el hit-test llega en local)
         int rows = Math.Max(0, (int)((h - 28) / CellH));
         int n = Math.Min(count, rows * DropCols);
         _dropCells = n;

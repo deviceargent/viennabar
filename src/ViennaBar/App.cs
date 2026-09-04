@@ -333,11 +333,34 @@ internal sealed unsafe class App : IDisposable
             _ = AppendMenu(hmenu, default, 2, m2);
             _ = AppendMenu(hmenu, default, 3, m3);
         }
+        // menu programatico (sin click previo que active): SetForegroundWindow
+        // es OBLIGATORIO o el menu aparece muerto (no recibe input). Como somos
+        // proceso de fondo, el anti-focus-stealing lo niega: puente con
+        // AttachThreadInput al thread foreground (patron documentado).
+        // WM_NULL post-cierre evita el menu fantasma.
+        try
+        {
+            var fg = GetForegroundWindow();
+            if (!fg.IsNull)
+            {
+                uint fgId = GetWindowThreadProcessId(fg, null);
+                uint ourId = GetWindowThreadProcessId(_hwnd, null);
+                if (fgId != ourId && ourId != 0)
+                {
+                    _ = AttachThreadInput(ourId, fgId, true);
+                    _ = SetForegroundWindow(_hwnd);
+                    _ = AttachThreadInput(ourId, fgId, false);
+                }
+                else _ = SetForegroundWindow(_hwnd);
+            }
+        }
+        catch { }
         _ = GetCursorPos(out var pt);
         int cmd = TrackPopupMenu(hmenu,
             TRACK_POPUP_MENU_FLAGS.TPM_RETURNCMD | TRACK_POPUP_MENU_FLAGS.TPM_RIGHTBUTTON,
             pt.X, pt.Y, 0, _hwnd, null);
         _ = DestroyMenu(hmenu);
+        _ = PostMessage(_hwnd, 0, 0, 0);   // WM_NULL
         if (cmd == 1 || cmd == 2)
         {
             // UI de progreso del shell + deshacer (ALLOWUNDO); el tree se

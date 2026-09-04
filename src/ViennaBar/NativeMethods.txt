@@ -117,6 +117,8 @@ FindWindow
 GetAncestor
 SetForegroundWindow
 GetForegroundWindow
+GetWindowThreadProcessId
+AttachThreadInput
 DwmSetWindowAttribute
 DWMWA_USE_IMMERSIVE_DARK_MODE
 DwmExtendFrameIntoClientArea
