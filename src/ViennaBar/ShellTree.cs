@@ -156,24 +156,28 @@ internal sealed class ShellTree : IDisposable
             float cy = y + 4 + (i - _topRow) * RowH;
             if (ReferenceEquals(node, _selected))
                 ctx.FillRect(Skin.Sel, x + 2, cy - 1, w - 8, RowH);
-            string indent = depth == 0 ? "" : "    ";
+            string indent = new string(' ', depth * 4);
             string mark = node.IsFolder ? (node.Expanded ? "- " : "+ ") : "  ";
             ctx.Text(indent + mark + node.Name, AppText.Fmt, Skin.Text, x + 8, cy, w - 20);
         }
     }
 
-    // filas visibles planas (raiz + hijos de expandidas) para render/hit/scroll
+    // filas visibles planas (recursivo: hijos de toda expandida) para render/hit/scroll
     private List<(TreeNode node, int depth)> VisibleNodes()
     {
         var list = new List<(TreeNode, int)>();
-        foreach (var root in Roots)
-        {
-            list.Add((root, 0));
-            if (root.Expanded)
-                foreach (var c in root.Children) list.Add((c, 1));
-        }
+        foreach (var root in Roots) AddVisible(list, root, 0);
         return list;
     }
+
+    private static void AddVisible(List<(TreeNode, int)> list, TreeNode node, int depth)
+    {
+        list.Add((node, depth));
+        if (node.Expanded)
+            foreach (var c in node.Children) AddVisible(list, c, depth + 1);
+    }
+
+    internal int VisibleCount => VisibleNodes().Count;
 
     private int _topRow;
     private int _treeH;

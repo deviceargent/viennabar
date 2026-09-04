@@ -603,6 +603,7 @@ internal static class Program
         tree.ExpandToPath(deep);
         var deepNode = FindNode(tree.Roots, deep);
         Check(deepNode is not null && deepNode.Expanded, "nav: desciende 2 niveles desde raiz FS");
+        Check(tree.VisibleCount >= 6, $"nav: visibles incluye nietos ({tree.VisibleCount})");
         Check(tree.Selected is not null && tree.Selected.ParsingName.TrimEnd('\\')
             .Equals(deep.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase), "nav: select destino");
         tree.ScrollBy(9999, 360);
