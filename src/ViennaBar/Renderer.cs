@@ -246,18 +246,23 @@ internal sealed unsafe class Renderer : IDisposable
 
     // bitmap del thumb (o 0): resuelve via Shell una vez y cachea.
     // size fijo 64: SIIG escala, D2D re-escala al dibujar.
+    // Los FALLOS no se cachean: un SIIG transitorio (archivo en uso durante
+    // un move) reintenta en el proximo paint en vez de brickearse.
     internal nint GetThumb(string path)
     {
         if (_thumbs.TryGetValue(path, out var hit)) return hit;
-        if (_thumbs.Count > 40) PurgeThumbs();
         nint bmp = 0;
         var px = ViennaBar.ShellNative.ShellNative.GetThumbnailPixels(path, 64);
         if (px is not null)
         {
             try { bmp = CreateBitmapFromPixels(px.Value.w, px.Value.h, px.Value.buf, (uint)(px.Value.w * 4)); }
             finally { ViennaBar.ShellNative.ShellNative.FreeThumbnail(px.Value.buf); }
+            if (bmp != 0)
+            {
+                if (_thumbs.Count > 40) PurgeThumbs();
+                _thumbs[path] = bmp;
+            }
         }
-        _thumbs[path] = bmp;   // cachea tambien el 0 (no reintentar por paint)
         return bmp;
     }
 

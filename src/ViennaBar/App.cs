@@ -516,6 +516,7 @@ internal sealed unsafe class App : IDisposable
 
                     case 3: // widgets tick (solo con barra visible)
                         _widgets.OnTimer(hwnd, 3);
+                        _drop.PruneMissing();
                         break;
 
                     case TimerDrawer: // auto-close del drawer (idle)

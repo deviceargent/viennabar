@@ -45,6 +45,7 @@ internal static class Program
             if (stage == "m2ifeo") return StageM2Ifeo();
             if (stage == "virtual") return StageVirtual();
             if (stage == "thumb") return StageThumb();
+            if (stage == "prune") return StagePrune();
             if (stage == "headless") return StageHeadless();
 
             Log("stage1: OpenAppsFolder");
@@ -229,6 +230,7 @@ internal static class Program
         if (StageM2Ifeo() != 0) rc = 1;
         if (StageVirtual() != 0) rc = 1;
         if (StageThumb() != 0) rc = 1;
+        if (StagePrune() != 0) rc = 1;
         Log(rc == 0 ? "=== headless ALL PASS" : "=== headless FAILURES");
         return rc;
     }
@@ -705,6 +707,27 @@ internal static class Program
             "thumb: missing -> null");
         Check(Shell.GetThumbnailPixels(f, 8) is null, "thumb: size chico -> null");
         try { System.IO.File.Delete(f); } catch { }
+        return _failures == 0 ? 0 : 1;
+    }
+
+    private static int StagePrune()
+    {
+        _failures = 0;
+        Log("-- prune");
+        // PruneMissing no necesita ventana (App.Instance null-safe)
+        var engine = new ViennaBar.DropEngine(new ViennaBar.ShellTree());
+        string live = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-prunetest.txt");
+        System.IO.File.WriteAllText(live, "x");
+        string dead = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-prunetest-dead.txt");
+        engine.DropStack.Add(dead);
+        engine.DropStack.Add(live);
+        engine.DropStack.Add(dead);
+        engine.PruneMissing();
+        Check(engine.DropStack.Count == 1 && engine.DropStack[0] == live, "prune: saca muertos, deja vivos");
+        engine.PruneMissing();
+        Check(engine.DropStack.Count == 1, "prune: idempotente");
+        try { System.IO.File.Delete(live); } catch { }
+        engine.Dispose();
         return _failures == 0 ? 0 : 1;
     }
 

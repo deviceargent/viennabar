@@ -92,6 +92,21 @@ internal sealed class DropEngine : ViennaBar.ShellNative.DropTargetCcw, IDisposa
         }
     }
 
+    // poda de seguridad: paths que ya no existen (movidos/borrados fuera de
+    // nuestro control, o efecto COPY sobre original efimero). Red de
+    // contencion para thumbs fantasmas. OJO: share de red caida tambien da
+    // false (v1: aceptado, el re-drop lo restaura).
+    internal void PruneMissing()
+    {
+        int before = DropStack.Count;
+        DropStack.RemoveAll(p => !System.IO.File.Exists(p));
+        if (DropStack.Count != before)
+        {
+            App.AppLog($"[drop] poda {before - DropStack.Count} muertos");
+            App.Instance?.Invalidate();
+        }
+    }
+
     public new void Dispose()
     {
         Detach();
