@@ -615,9 +615,10 @@ internal sealed unsafe class App : IDisposable
 
             case WM_MOUSEWHEEL:
             {
-                // scroll: drawer abierto sobre su tercio, si no el tree
+                // scroll: drawer abierto sobre su tercio, si no el tree.
+                // OJO: el delta va en WPARAM (HIWORD), lParam trae coords.
                 int wy = GET_Y_LPARAM(lparam);
-                short delta = (short)((lparam.Value >> 16) & 0xFFFF);
+                short delta = (short)((wparam.Value >> 16) & 0xFFFF);
                 if (wy >= WidgetsH + TreeH && _drawerOpen)
                     _drawer.ScrollBy(-delta / 120 * 3);
                 else if (wy >= WidgetsH && wy < WidgetsH + TreeH)
