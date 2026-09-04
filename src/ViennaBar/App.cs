@@ -287,6 +287,7 @@ internal sealed unsafe class App : IDisposable
 
         // el RT de D2D sigue el tamaño de la ventana
         _renderer.Resize((nint)_hwnd.Value, (uint)(abd.rc.right - abd.rc.left), (uint)(abd.rc.bottom - abd.rc.top));
+        _widgets.OnRendererReset();   // handles de thumbs del clip mueren con el RT
         _ = InvalidateRect(_hwnd, (RECT*)null, true);
     }
 
@@ -445,6 +446,11 @@ internal sealed unsafe class App : IDisposable
             // tercio widgets: click en linea del clip = restaurar al portapapeles
             int ci = _widgets.ClipHitTest(y);
             if (ci >= 0) _widgets.RestoreClip(ci);
+            else
+            {
+                int ii = _widgets.ImgHitTest(x, y);
+                if (ii >= 0) _widgets.RestoreClipImage(ii);
+            }
         }
     }
 

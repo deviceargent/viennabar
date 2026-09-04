@@ -351,6 +351,17 @@ internal unsafe struct RenderCtx
 
     public nint GetThumb(string path) => _owner.GetThumb(path);
 
+    // upload de pixeles BGRA premultiplicados gestionado por el caller
+    // (thumbs del portapapeles): el buffer se pinnea solo durante el upload.
+    public unsafe nint UploadImage(byte[] bgra, int w, int h)
+    {
+        if (bgra.Length < w * h * 4) return 0;
+        fixed (byte* p = bgra)
+            return _owner.CreateBitmapFromPixels(w, h, (nint)p, (uint)(w * 4));
+    }
+
+    public void ReleaseImage(nint bmp) => _owner.ReleaseBitmap(bmp);
+
     private static D2D1_COLOR_F ArgbToColorF(int argb) => new()
     {
         r = ((argb >> 16) & 0xFF) / 255f,

@@ -457,6 +457,74 @@ internal static class Program
         bool sane = true;
         foreach (var d in w.Disks) if (d.usedFrac < 0 || d.usedFrac > 1 || d.label.Length < 2) sane = false;
         Check(sane, "widgets: fracs en rango");
+        // marcado de copiado
+        var w2 = new ViennaBar.Widgets();
+        w2.PushClip("uno");
+        w2.PushClip("dos");
+        Check(w2.CopiedIndex == 0 && w2.Clips[0] == "dos", "widgets: push marca frente");
+        // DIB 24bpp 2x2 bottom-up -> BGRA premult top-down
+        nint dib = System.Runtime.InteropServices.Marshal.AllocHGlobal(40 + 8 * 2);
+        try
+        {
+            unsafe
+            {
+                byte* p = (byte*)(void*)dib;
+                for (int i = 0; i < 56; i++) p[i] = 0;
+                *(uint*)p = 40;
+                *(int*)(p + 4) = 2; *(int*)(p + 8) = 2;
+                *(ushort*)(p + 12) = 1; *(ushort*)(p + 14) = 24;
+                // fila bottom: rojo, verde
+                p[40] = 0; p[41] = 0; p[42] = 255; p[43] = 0; p[44] = 255; p[45] = 0;
+                // fila top: azul, blanco
+                p[48] = 255; p[49] = 0; p[50] = 0; p[51] = 255; p[52] = 255; p[53] = 255;
+                var r = ViennaBar.Widgets.ParseDibToBgra((void*)dib, 56);
+                Check(r is not null && r.Value.w == 2 && r.Value.h == 2, "widgets: dib24 dims");
+                if (r is not null)
+                {
+                    uint[] px = new uint[4];
+                    System.Buffer.BlockCopy(r.Value.bgra, 0, px, 0, 16);
+                    Check(px[0] == 0xFF0000FFu && px[1] == 0xFFFFFFFFu
+                        && px[2] == 0xFFFF0000u && px[3] == 0xFF00FF00u, "widgets: dib24 pixeles+flip");
+                }
+            }
+        }
+        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(dib); }
+        // DIB 32bpp con alfa real -> premultiplica; alfa 0 global -> opaco
+        nint d32 = System.Runtime.InteropServices.Marshal.AllocHGlobal(48);
+        try
+        {
+            unsafe
+            {
+                byte* p = (byte*)(void*)d32;
+                for (int i = 0; i < 48; i++) p[i] = 0;
+                *(uint*)p = 40;
+                *(int*)(p + 4) = 2; *(int*)(p + 8) = 1;
+                *(ushort*)(p + 12) = 1; *(ushort*)(p + 14) = 32;
+                ((uint*)(p + 40))[0] = 0x80FF0000u;   // a=128 r=255
+                ((uint*)(p + 40))[1] = 0x00000000u;
+                var r = ViennaBar.Widgets.ParseDibToBgra((void*)d32, 48);
+                bool ok = r is not null;
+                uint[] px = new uint[2];
+                if (ok) System.Buffer.BlockCopy(r.Value.bgra, 0, px, 0, 8);
+                Check(ok && px[0] == 0x80800000u && px[1] == 0x00000000u, "widgets: dib32 premult");
+            }
+        }
+        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(d32); }
+        nint bad = System.Runtime.InteropServices.Marshal.AllocHGlobal(64);
+        try
+        {
+            unsafe
+            {
+                byte* p = (byte*)(void*)bad;
+                for (int i = 0; i < 64; i++) p[i] = 0;
+                *(uint*)p = 40;
+                *(int*)(p + 4) = 2; *(int*)(p + 8) = 2;
+                *(ushort*)(p + 12) = 1; *(ushort*)(p + 14) = 8;   // 8bpp no soportado
+                Check(ViennaBar.Widgets.ParseDibToBgra((void*)bad, 64) is null, "widgets: dib8 -> null");
+                Check(ViennaBar.Widgets.ParseDibToBgra((void*)bad, 10) is null, "widgets: dib corto -> null");
+            }
+        }
+        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(bad); }
         w.Dispose();
         return _failures == 0 ? 0 : 1;
     }
