@@ -127,13 +127,22 @@ internal sealed class Widgets : IDisposable
             for (int i = 0; i < _clipImages.Count; i++)
             {
                 var im = _clipImages[i];
-                if (im.bmp == 0)
+                nint bmp;
+                if (im.SourcePath is not null)
                 {
-                    var up = ctx.UploadImage(im.bgra, im.w, im.h);
-                    if (up != 0) { im.bmp = up; _clipImages[i] = im; }
+                    bmp = ctx.GetThumb(im.SourcePath);
+                }
+                else
+                {
+                    if (im.bmp == 0 && im.bgra is not null)
+                    {
+                        var up = ctx.UploadImage(im.bgra, im.w, im.h);
+                        if (up != 0) { im.bmp = up; _clipImages[i] = im; }
+                    }
+                    bmp = im.bmp;
                 }
                 float ix = 12 + i * 40;
-                if (im.bmp != 0) ctx.DrawBitmap(im.bmp, ix, by, 32, 32);
+                if (bmp != 0) ctx.DrawBitmap(bmp, ix, by, 32, 32);
                 else ctx.FillRect(Skin.Search, ix, by, 32, 32);
                 if (i == _copiedImg)
                 {
@@ -216,14 +225,87 @@ internal sealed class Widgets : IDisposable
                 // imagen (CF_DIB): va a la tira, y marca como copiada
                 var hd = GetClipboardData(8);
                 if (!hd.IsNull) PushClipImage(hd);
+                // copia de ARCHIVOS de imagen (HDROP sin bitmap): tira por path
+                var hh = GetClipboardData(15);
+                if (!hh.IsNull) PushClipFileImages(hh);
             }
             finally { _ = CloseClipboard(); }
         }
         catch { }
     }
 
-    // captura DIB del handle ya lockeado por el caller (clipboard abierto).
-    // Dedupea contra la ultima (evita doble entrada texto+imagen del mismo copy).
+    // HDROP con imagenes -> entradas por path (thumb via shell, restore HDROP).
+    // Se usa DragQueryFile como los consumidores nativos.
+    private unsafe void PushClipFileImages(HANDLE hh)
+    {
+        try
+        {
+            var hDrop = new Windows.Win32.UI.Shell.HDROP((nint)hh.Value);
+            uint n = DragQueryFile(hDrop, 0xFFFFFFFF, null, 0);
+            bool added = false;
+            for (uint i = 0; i < n && i < 4; i++)
+            {
+                char* buf = stackalloc char[260];
+                uint len = DragQueryFile(hDrop, i, buf, 260);
+                if (len == 0) continue;
+                string path = new string(buf, 0, (int)len);
+                if (!IsImagePath(path) || !System.IO.File.Exists(path)) continue;
+                _clipImages.RemoveAll(e => e.SourcePath == path);
+                _clipImages.Insert(0, new ClipImage { SourcePath = path });
+                added = true;
+            }
+            if (added)
+            {
+                while (_clipImages.Count > MaxClipImages) _clipImages.RemoveAt(_clipImages.Count - 1);
+                _copiedImg = 0;
+                App.Instance?.Invalidate();
+            }
+        }
+        catch { }
+    }
+
+    // buffer CF_HDROP (DROPFILES + paths double-null). Testeable headless.
+    internal static byte[] BuildHDropBytes(IList<string> paths)
+    {
+        int chars = 0;
+        foreach (var p in paths) chars += p.Length + 1;
+        var buf = new byte[20 + (chars + 1) * 2];
+        buf[0] = 20;   // pFiles (DROPFILES 20B, resto cero)
+        buf[19] = 1;   // fWide (offset 19 en el header de 20B)
+        int o = 20;
+        foreach (var p in paths)
+        {
+            foreach (char c in p) { buf[o++] = (byte)c; buf[o++] = (byte)(c >> 8); }
+            buf[o++] = 0; buf[o++] = 0;
+        }
+        buf[o++] = 0; buf[o++] = 0;
+        return buf;
+    }
+
+    // restaura una referencia de archivo al portapapeles (CF_HDROP). true = ok.
+    private unsafe bool WriteClipboardHdrop(string path)
+    {
+        try
+        {
+            if (!OpenClipboard(_hwnd)) return false;
+            try
+            {
+                _ = EmptyClipboard();
+                byte[] raw = BuildHDropBytes(new[] { path });
+                var h = GlobalAlloc((Windows.Win32.System.Memory.GLOBAL_ALLOC_FLAGS)0x0002, (nuint)raw.Length);
+                if (h.Value is null) return false;
+                void* p = GlobalLock(h);
+                if (p is null) { _ = GlobalFree(h); return false; }
+                try { Marshal.Copy(raw, 0, (nint)p, raw.Length); }
+                finally { _ = GlobalUnlock(h); }
+                void* rawH = h;
+                if (SetClipboardData(15, new HANDLE(new IntPtr(rawH))).IsNull) { _ = GlobalFree(h); return false; }
+                return true;
+            }
+            finally { _ = CloseClipboard(); }
+        }
+        catch { return false; }
+    }
     private unsafe void PushClipImage(HANDLE hd)
     {
         try
@@ -295,7 +377,10 @@ internal sealed class Widgets : IDisposable
     {
         if (index < 0 || index >= _clipImages.Count) return;
         var im = _clipImages[index];
-        if (WriteClipboardDib(im.bgra, im.w, im.h)) { _copiedImg = index; App.Instance?.Invalidate(); }
+        bool ok = im.SourcePath is not null
+            ? WriteClipboardHdrop(im.SourcePath)
+            : im.bgra is not null && WriteClipboardDib(im.bgra, im.w, im.h);
+        if (ok) { _copiedImg = index; App.Instance?.Invalidate(); }
     }
 
     // el RT murio (Resize): los handles caen, los bytes quedan (re-upload lazy)
@@ -318,10 +403,19 @@ internal sealed class Widgets : IDisposable
 
     internal struct ClipImage
     {
-        public byte[] bgra;   // 32bpp premultiplicado top-down (para D2D y restore)
+        public byte[]? bgra;      // captura DIB (null si es referencia a archivo)
+        public string? SourcePath; // copia de archivo (thumb via shell, restore HDROP)
         public int w, h;
         public nint bmp;      // handle D2D (0 = subir en el proximo paint)
     }
+
+    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".ico",
+    };
+
+    internal static bool IsImagePath(string path) =>
+        ImageExtensions.Contains(System.IO.Path.GetExtension(path));
 
     private readonly List<ClipImage> _clipImages = new();
     private const int MaxClipImages = 2;

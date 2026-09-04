@@ -441,7 +441,16 @@ internal static class Program
         _failures = 0;
         Log("-- widgets");
         Check(ViennaBar.Widgets.FormatGb(0) == "0 GB", "widgets: 0B");
-        Check(ViennaBar.Widgets.FormatGb(1073741824) == "1 GB", "widgets: 1GiB");
+        Check(ViennaBar.Widgets.IsImagePath("a.PNG") && ViennaBar.Widgets.IsImagePath("b.jpeg")
+            && !ViennaBar.Widgets.IsImagePath("c.txt") && !ViennaBar.Widgets.IsImagePath("sin-ext"),
+            "widgets: IsImagePath");
+        // layout CF_HDROP fabricado: header + paths + double-null
+        var hb = ViennaBar.Widgets.BuildHDropBytes(new List<string> { "C:\\a b\\c.txt", "D:\\e.png" });
+        bool hdropOk = hb[0] == 20 && hb[4] == 0 && hb[19] == 1;
+        string all = System.Text.Encoding.Unicode.GetString(hb, 20, hb.Length - 22);
+        hdropOk &= all == "C:\\a b\\c.txt\0D:\\e.png\0";
+        hdropOk &= hb[hb.Length - 2] == 0 && hb[hb.Length - 1] == 0;
+        Check(hdropOk, "widgets: BuildHDropBytes layout");        Check(ViennaBar.Widgets.FormatGb(1073741824) == "1 GB", "widgets: 1GiB");
         Check(ViennaBar.Widgets.FormatGb(123456789012) == "115 GB", "widgets: 115GiB");
         var w = new ViennaBar.Widgets();
         w.PushClip("  hola  ");
