@@ -84,14 +84,29 @@ internal sealed class DropEngine : ViennaBar.ShellNative.DropTargetCcw, IDisposa
 
     internal void StackPaths(List<string> paths)
     {
-        foreach (var p in paths) DropStack.Add(p);
-        if (paths.Count > 0)
+        // snapshot al apilar: lo que entra al stack es copia propia (o el
+        // original si no se puede: dirs, enormes, faltantes). El menu
+        // Mover/Copiar NO pasa por aca: opera con los paths originales.
+        var snapped = new List<string>(paths.Count);
+        foreach (var p in paths) snapped.Add(ViennaBar.ShellNative.ShellNative.SnapshotRealFile(p));
+        foreach (var p in snapped) DropStack.Add(p);
+        if (snapped.Count > 0)
         {
-            App.AppLog($"[drop] +{paths.Count} al stack (total {DropStack.Count}): {paths[0]}");
+            App.AppLog($"[drop] +{snapped.Count} al stack (total {DropStack.Count}): {snapped[0]}");
             App.Instance?.Invalidate();
         }
     }
 
+    // saca del stack SIN tocar el archivo (boton × del drawer)
+    internal void Unstack(int index)
+    {
+        if (index < 0 || index >= DropStack.Count) return;
+        var name = DropStack[index];
+        int cut = name.LastIndexOf('\\');
+        App.AppLog($"[drop] desapila {(cut >= 0 ? name[(cut + 1)..] : name)} (quedan {DropStack.Count - 1})");
+        DropStack.RemoveAt(index);
+        App.Instance?.Invalidate();
+    }
     // poda de seguridad: paths que ya no existen (movidos/borrados fuera de
     // nuestro control, o efecto COPY sobre original efimero). Red de
     // contencion para thumbs fantasmas. OJO: share de red caida tambien da

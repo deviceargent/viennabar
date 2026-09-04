@@ -264,12 +264,29 @@ internal sealed class Drawer
             nint bmp = ctx.GetThumb(_dropStack[i]);
             if (bmp != 0) ctx.DrawBitmap(bmp, cx - ThumbPx / 2, cy, ThumbPx, ThumbPx);
             else ctx.FillRect(Skin.Search, cx - ThumbPx / 2, cy, ThumbPx, ThumbPx);
+            // × para desapilar (solo quita del stack, el archivo no se toca)
+            float xx = x + 4 + col * _dropCellW + _dropCellW - 18;
+            ctx.Text("×", FBig, Skin.Muted, xx, cy - 4, 16, 16);
             var name = _dropStack[i];
             int cut = name.LastIndexOf('\\');
             if (cut >= 0) name = name[(cut + 1)..];
             if (name.Length > 14) name = name[..13] + "…";
             ctx.Text(name, F, Skin.Text, cx - _dropCellW / 2 + 4, cy + ThumbPx + 2, _dropCellW - 8, 14);
         }
+    }
+
+    // × bajo el punto (coords drawer-local) -> index en el stack, o -1.
+    // Se chequea ANTES que el press de drag (el × desapila al instante).
+    internal int ThumbRemoveHitTest(int x, int y)
+    {
+        int idx = ThumbHitTest(x, y);
+        if (idx < 0) return -1;
+        int p = _dropStack!.Count - 1 - idx;   // posicion de grilla
+        int row = p / DropCols, col = p % DropCols;
+        float cy = _dropGridY + row * CellH;
+        float xx = 4 + col * _dropCellW + _dropCellW - 18;
+        if (x >= xx && x < xx + 16 && y >= cy - 4 && y < cy + 12) return idx;
+        return -1;
     }
 
     // celda bajo el punto (coords drawer-local) -> index en el stack, o -1

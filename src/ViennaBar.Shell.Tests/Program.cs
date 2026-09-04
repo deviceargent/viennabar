@@ -46,6 +46,7 @@ internal static class Program
             if (stage == "virtual") return StageVirtual();
             if (stage == "thumb") return StageThumb();
             if (stage == "prune") return StagePrune();
+            if (stage == "snap") return StageSnap();
             if (stage == "headless") return StageHeadless();
 
             Log("stage1: OpenAppsFolder");
@@ -231,6 +232,7 @@ internal static class Program
         if (StageVirtual() != 0) rc = 1;
         if (StageThumb() != 0) rc = 1;
         if (StagePrune() != 0) rc = 1;
+        if (StageSnap() != 0) rc = 1;
         Log(rc == 0 ? "=== headless ALL PASS" : "=== headless FAILURES");
         return rc;
     }
@@ -728,6 +730,40 @@ internal static class Program
         Check(engine.DropStack.Count == 1, "prune: idempotente");
         try { System.IO.File.Delete(live); } catch { }
         engine.Dispose();
+        return _failures == 0 ? 0 : 1;
+    }
+
+    private static int StageSnap()
+    {
+        _failures = 0;
+        Log("-- snap");
+        string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-snapping");
+        System.IO.Directory.CreateDirectory(dir);
+        string src = System.IO.Path.Combine(dir, "orig.txt");
+        System.IO.File.WriteAllText(src, "snap-me");
+        string s1 = Shell.SnapshotRealFile(src);
+        Check(s1 != src && System.IO.File.Exists(s1)
+            && System.IO.File.ReadAllText(s1) == "snap-me"
+            && s1.StartsWith(System.IO.Path.GetTempPath(), StringComparison.OrdinalIgnoreCase),
+            "snap: copia independiente en temp");
+        // inmunidad: borrar el original no afecta al snapshot
+        System.IO.File.Delete(src);
+        Check(System.IO.File.Exists(s1), "snap: sobrevive al original");
+        foreach (var f in System.IO.Directory.GetFiles(
+            System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ViennaBar", "drop")))
+            try { System.IO.File.Delete(f); } catch { }
+        // dirs y faltantes van por referencia
+        Check(Shell.SnapshotRealFile(dir) == dir, "snap: dir por referencia");
+        Check(Shell.SnapshotRealFile(System.IO.Path.Combine(dir, "noexiste.txt"))
+            .EndsWith("noexiste.txt"), "snap: faltante por referencia");
+        // tope de tamano via cap chico
+        System.IO.File.WriteAllText(src, "1234567890");
+        Check(Shell.SnapshotRealFile(src, 5) == src, "snap: sobre tope por referencia");
+        // wipe de arranque
+        Shell.ClearDropSnapshots();
+        Check(!System.IO.Directory.Exists(
+            System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ViennaBar", "drop")), "snap: wipe");
+        try { System.IO.Directory.Delete(dir, true); } catch { }
         return _failures == 0 ? 0 : 1;
     }
 

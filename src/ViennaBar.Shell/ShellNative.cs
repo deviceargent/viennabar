@@ -898,6 +898,37 @@ internal static unsafe class ShellNative
         if (buf != 0) Marshal.FreeCoTaskMem(buf);
     }
 
+    // snapshot de archivo REAL al apilar: la barra guarda copia propia en
+    // temp (inmune a MOVE/DELETE del original). Dirs, faltantes y archivos
+    // sobre el tope quedan por referencia (comportamiento anterior).
+    // El menu deferral (Mover/Copiar) opera con ORIGINALES (no pasa por aca).
+    internal static string SnapshotRealFile(string path, long maxBytes = 256L * 1024 * 1024)
+    {
+        try
+        {
+            if (!System.IO.File.Exists(path)) return path;
+            if (new System.IO.FileInfo(path).Length > maxBytes) return path;
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ViennaBar", "drop");
+            System.IO.Directory.CreateDirectory(dir);
+            string dest = UniquePath(System.IO.Path.Combine(dir,
+                SanitizeFileName(System.IO.Path.GetFileName(path))));
+            System.IO.File.Copy(path, dest);
+            return dest;
+        }
+        catch { return path; }
+    }
+
+    // el stack vive en memoria: al arrancar, los snapshots huerfanos se borran
+    internal static void ClearDropSnapshots()
+    {
+        try
+        {
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ViennaBar", "drop");
+            if (System.IO.Directory.Exists(dir)) System.IO.Directory.Delete(dir, true);
+        }
+        catch { }
+    }
+
     // Devuelve los paths del CF_HDROP (o lista vacÃ­a). El core lo llama desde
     // el CCW IDropTarget con el void* que le entrega OLE.
 

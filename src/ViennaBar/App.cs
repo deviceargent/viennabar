@@ -102,6 +102,7 @@ internal sealed unsafe class App : IDisposable
         }
         if (!SingleInstance.Acquire()) return 0;
 
+        ViennaBar.ShellNative.ShellNative.ClearDropSnapshots();   // stack en memoria: snapshots huerfanos fuera
         _ = Config.LoadDefault();   // settings + hot-reload watcher (antes que Skin)
         _ = Skin.LoadDefault();   // tokens + hot-reload watcher
         var tree = new ShellTree();
@@ -540,6 +541,7 @@ internal sealed unsafe class App : IDisposable
                     _pressIdx = -1;
                     _drawer.SetPressedItem(-1);
                 }
+                else if (_pressIdx == -2) _pressIdx = -1;   // × consumido: no-op
                 else OnClick(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
                 return default;
             }
@@ -549,8 +551,17 @@ internal sealed unsafe class App : IDisposable
                 int px = GET_X_LPARAM(lparam), py = GET_Y_LPARAM(lparam);
                 if (py >= WidgetsH + TreeH && !_drawerOpen)
                 {
+                    int ly = py - WidgetsH - TreeH;
+                    // × primero: desapila al instante (sin press, sin drag)
+                    int rx = _drawer.ThumbRemoveHitTest(px, ly);
+                    if (rx >= 0)
+                    {
+                        _drop.Unstack(rx);
+                        _pressIdx = -2;   // consumido: el UP no debe togglear nada
+                        return default;
+                    }
                     // drawer colapsado: press sobre thumb = potencial drag-out
-                    int idx = _drawer.ThumbHitTest(px, py - WidgetsH - TreeH);
+                    int idx = _drawer.ThumbHitTest(px, ly);
                     if (idx >= 0)
                     {
                         _pressIdx = idx;
