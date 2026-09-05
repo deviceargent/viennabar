@@ -496,6 +496,8 @@ internal sealed unsafe class App : IDisposable
             case WM_MOUSELEAVE:
                 // durante un drag OLE el capture se va al drag helper y llegan
                 // WM_MOUSELEAVE espurios → NO ocultar la barra en mitad de un drop
+                _tree.SetHover(null);
+                _drawer.HoverRow(-1);
                 if (!_hidden && !_dragActive)
                 {
                     _ = SetTimer(hwnd, TimerHide, HideDelayMs, null);
@@ -599,6 +601,23 @@ internal sealed unsafe class App : IDisposable
                 }
                 else
                 {
+                    // hover sigue al mouse (highlight, sin tocar seleccion de teclado)
+                    int hx = GET_X_LPARAM(lparam), hy = GET_Y_LPARAM(lparam);
+                    if (hy >= WidgetsH && hy < WidgetsH + TreeH)
+                    {
+                        _tree.SetHover(_tree.HitTestNode(hy - WidgetsH, FullWidthPx, TreeH));
+                        _drawer.HoverRow(-1);
+                    }
+                    else if (hy >= WidgetsH + TreeH && _drawerOpen)
+                    {
+                        _tree.SetHover(null);
+                        _drawer.HoverRow(_drawer.RowAt(hy - WidgetsH - TreeH));
+                    }
+                    else
+                    {
+                        _tree.SetHover(null);
+                        _drawer.HoverRow(-1);
+                    }
                     var tme = new TRACKMOUSEEVENT
                     {
                         cbSize = (uint)sizeof(TRACKMOUSEEVENT),

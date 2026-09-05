@@ -120,16 +120,32 @@ internal sealed class Drawer
 
     // click dentro del Ã¡rea del drawer (coords locales al drawer).
     // Layout: search box [0..SearchH] | filas desde SearchH+2 (calza con Render).
-    public void OnClick(int x, int y, int drawerH)
+    // hover del mouse sobre filas (pinta, no toca _selIdx). -1 = limpiar.
+    internal void HoverRow(int idx)
     {
-        if (y < SearchH + 2) return; // search box: F2 (IME)
+        if (_hoverIdx != idx)
+        {
+            _hoverIdx = idx;
+            App.Instance?.Invalidate();
+        }
+    }
 
+    // indice de fila para una y drawer-local (misma matematica que OnClick)
+    internal int RowAt(int y)
+    {
+        if (y < SearchH + 2) return -1;
         var results = CurrentResults();
         int idx = (int)((y - SearchH - 2) / RowH) + _topRow;
-        if (idx >= 0 && idx < results.Count)
+        return idx >= 0 && idx < results.Count ? idx : -1;
+    }
+
+    public void OnClick(int x, int y, int drawerH)
+    {
+        int idx = RowAt(y);
+        if (idx >= 0)
         {
             _selIdx = idx;
-            Launch(results[idx]);
+            Launch(CurrentResults()[idx]);
         }
     }
 
@@ -148,6 +164,7 @@ internal sealed class Drawer
 
     private List<AppCatalog.AppEntry>? _resultsCache;
     private string? _cacheSearch;
+    private int _hoverIdx = -1;   // highlight de hover (no pisa _selIdx del teclado)
 
     // BHID_SFUIObject = "GetUIObjectOf" del item â€” ruta canÃ³nica para IContextMenu
     private static readonly Guid SfUiObjectGuid = BHID_SFUIObject;
@@ -353,7 +370,7 @@ internal sealed class Drawer
         for (int i = first; i < last; i++)
         {
             float ry = dy + (i - first) * RowH;
-            if (i == _selIdx)
+            if (i == _selIdx || i == _hoverIdx)
                 ctx.FillRect(Skin.Sel, 6, ry - 1, w - 12, RowH);
             ctx.Text(results[i].Name, F, i == _selIdx ? Skin.Text : Skin.Text, 8, ry, w - 20);
         }

@@ -154,7 +154,7 @@ internal sealed class ShellTree : IDisposable
         {
             var (node, depth) = rows[i];
             float cy = y + 4 + (i - _topRow) * RowH;
-            if (ReferenceEquals(node, _selected))
+            if (ReferenceEquals(node, _selected) || ReferenceEquals(node, _hovered))
                 ctx.FillRect(Skin.Sel, x + 2, cy - 1, w - 8, RowH);
             string indent = new string(' ', depth * 4);
             string mark = node.IsFolder ? (node.Expanded ? "- " : "+ ") : "  ";
@@ -184,6 +184,7 @@ internal sealed class ShellTree : IDisposable
     internal int TopRow => _topRow;
     internal TreeNode? Selected => _selected;
     private TreeNode? _selected;
+    private TreeNode? _hovered;   // highlight de hover (no pisa Selected)
 
     internal void ScrollBy(int lines, int height)
     {
@@ -209,6 +210,15 @@ internal sealed class ShellTree : IDisposable
     {
         _selected = node;
         EnsureVisible(node, height);
+    }
+
+    internal void SetHover(TreeNode? node)
+    {
+        if (!ReferenceEquals(_hovered, node))
+        {
+            _hovered = node;
+            App.Instance?.Invalidate();
+        }
     }
 
     internal TreeNode? HitTestNode(int y, int width, int height) => HitTest(y, width, height);
