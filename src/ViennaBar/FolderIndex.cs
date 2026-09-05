@@ -104,12 +104,54 @@ internal sealed class FolderIndex
     }
 
     // ranking: nombre exacto > empieza-con > contiene-nombre > contiene-path.
-    // Empate: path mas corto primero. Tope 50.
+    // Empate: path mas corto primero. Tope 50. Insensible a acentos
+    // (CompareInfo IgnoreNonSpace: "imagenes" matchea "Imágenes").
     public List<DirEntry> Search(string query)
     {
         List<DirEntry> snap;
         lock (_gate) snap = _dirs;
-        return SearchIn(snap, query);
+        var all = new List<DirEntry>(snap.Count + 8);
+        all.AddRange(snap);
+        all.AddRange(GetAliases());
+        return SearchIn(all, query);
+    }
+
+    private static readonly System.Globalization.CompareInfo Cmp =
+        System.Globalization.CultureInfo.InvariantCulture.CompareInfo;
+    private const System.Globalization.CompareOptions CmpOpt =
+        System.Globalization.CompareOptions.IgnoreCase | System.Globalization.CompareOptions.IgnoreNonSpace;
+
+    private static bool Eq(string a, string b) =>
+        Cmp.Compare(a, b, CmpOpt) == 0;
+    private static bool Starts(string a, string b) =>
+        Cmp.IsPrefix(a, b, CmpOpt);
+    private static bool Has(string a, string b) =>
+        Cmp.IndexOf(a, b, CmpOpt) >= 0;
+
+    // alias en español para las librerias personales (la barra habla español).
+    // Se resuelven una vez por sesion (un redirect a mitad de sesion no pica).
+    private static List<DirEntry>? _aliases;
+    internal static List<DirEntry> GetAliases()
+    {
+        if (_aliases is not null) return _aliases;
+        var list = new List<DirEntry>();
+        void Add(string name, string path)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(path) || !System.IO.Directory.Exists(path)) return;
+                list.Add(new DirEntry(name, System.IO.Path.GetFullPath(path).TrimEnd('\\')));
+            }
+            catch { }
+        }
+        Add("Escritorio", Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
+        Add("Documentos", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
+        Add("Descargas", ShellTree.DownloadsPath());
+        Add("Imágenes", Environment.GetFolderPath(Environment.SpecialFolder.MyPictures));
+        Add("Música", Environment.GetFolderPath(Environment.SpecialFolder.MyMusic));
+        Add("Videos", Environment.GetFolderPath(Environment.SpecialFolder.MyVideos));
+        _aliases = list;
+        return list;
     }
 
     internal static List<DirEntry> SearchIn(List<DirEntry> source, string query)
@@ -121,10 +163,10 @@ internal sealed class FolderIndex
         foreach (var d in source)
         {
             int s;
-            if (d.Name.Equals(q, StringComparison.OrdinalIgnoreCase)) s = 0;
-            else if (d.Name.StartsWith(q, StringComparison.OrdinalIgnoreCase)) s = 1;
-            else if (d.Name.Contains(q, StringComparison.OrdinalIgnoreCase)) s = 2;
-            else if (d.FullPath.Contains(q, StringComparison.OrdinalIgnoreCase)) s = 3;
+            if (Eq(d.Name, q)) s = 0;
+            else if (Starts(d.Name, q)) s = 1;
+            else if (Has(d.Name, q)) s = 2;
+            else if (Has(d.FullPath, q)) s = 3;
             else continue;
             scored.Add((s, d.FullPath.Length, d));
         }

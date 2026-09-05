@@ -892,6 +892,19 @@ internal static class Program
         Check(r.Count >= 2 && r[0].Name == "match" && r[1].Name == "prefix-match", "findex: rank exacto primero");
         Check(ViennaBar.FolderIndex.SearchIn(list, "").Count == 0, "findex: query vacia");
         Check(ViennaBar.FolderIndex.SearchIn(list, "zzz-noexiste").Count == 0, "findex: sin match");
+        // acentos: "imagenes" encuentra "Imágenes" (y viceversa)
+        var acc = new List<ViennaBar.FolderIndex.DirEntry>
+        {
+            new("Imágenes", "C:\\ Fotos\\Imágenes"),
+            new("Otra", "C:\\x"),
+        };
+        Check(ViennaBar.FolderIndex.SearchIn(acc, "imagenes").Count == 1, "findex: fold acentos");
+        Check(ViennaBar.FolderIndex.SearchIn(acc, "IMÁGENES")[0].Name == "Imágenes", "findex: exacto con acento");
+        // alias españoles resuelven a paths reales existentes
+        var aliases = ViennaBar.FolderIndex.GetAliases();
+        Check(aliases.Exists(a => a.Name == "Descargas" && System.IO.Directory.Exists(a.FullPath)),
+            "findex: alias Descargas");
+        Check(aliases.TrueForAll(a => System.IO.Directory.Exists(a.FullPath)), "findex: alias existen");
         // UserRoots: existen y sin duplicados
         var roots = ViennaBar.FolderIndex.UserRoots();
         Check(roots.Count > 0 && roots.TrueForAll(System.IO.Directory.Exists), "findex: UserRoots existen");
