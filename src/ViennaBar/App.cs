@@ -611,7 +611,7 @@ internal sealed unsafe class App : IDisposable
                     else if (hy >= WidgetsH + TreeH && _drawerOpen)
                     {
                         _tree.SetHover(null);
-                        _drawer.HoverRow(_drawer.RowAt(hy - WidgetsH - TreeH));
+                        if (_drawer.HoverRow(_drawer.RowAt(hy - WidgetsH - TreeH))) ArmDrawerTimer();
                     }
                     else
                     {
@@ -639,7 +639,10 @@ internal sealed unsafe class App : IDisposable
                 int wy = GET_Y_LPARAM(lparam);
                 short delta = (short)((wparam.Value >> 16) & 0xFFFF);
                 if (wy >= WidgetsH + TreeH && _drawerOpen)
+                {
                     _drawer.ScrollBy(-delta / 120 * 3);
+                    ArmDrawerTimer();   // scrollear es usar: no cerrar encima
+                }
                 else if (wy >= WidgetsH && wy < WidgetsH + TreeH)
                     _tree.ScrollBy(-delta / 120 * 3, TreeH);
                 return default;

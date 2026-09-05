@@ -121,13 +121,13 @@ internal sealed class Drawer
     // click dentro del Ã¡rea del drawer (coords locales al drawer).
     // Layout: search box [0..SearchH] | filas desde SearchH+2 (calza con Render).
     // hover del mouse sobre filas (pinta, no toca _selIdx). -1 = limpiar.
-    internal void HoverRow(int idx)
+    // Devuelve si cambio (la app re-arma el auto-close: hover = uso).
+    internal bool HoverRow(int idx)
     {
-        if (_hoverIdx != idx)
-        {
-            _hoverIdx = idx;
-            App.Instance?.Invalidate();
-        }
+        if (_hoverIdx == idx) return false;
+        _hoverIdx = idx;
+        App.Instance?.Invalidate();
+        return true;
     }
 
     // indice de fila para una y drawer-local (misma matematica que OnClick)
