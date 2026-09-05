@@ -43,6 +43,7 @@ internal static class Program
             if (stage == "nav") return StageNav();
             if (stage == "launcher") return StageLauncher();
             if (stage == "m2ifeo") return StageM2Ifeo();
+            if (stage == "findex") return StageFindEx();
             if (stage == "virtual") return StageVirtual();
             if (stage == "thumb") return StageThumb();
             if (stage == "prune") return StagePrune();
@@ -229,6 +230,7 @@ internal static class Program
         if (StageNav() != 0) rc = 1;
         if (StageLauncher() != 0) rc = 1;
         if (StageM2Ifeo() != 0) rc = 1;
+        if (StageFindEx() != 0) rc = 1;
         if (StageVirtual() != 0) rc = 1;
         if (StageThumb() != 0) rc = 1;
         if (StagePrune() != 0) rc = 1;
@@ -861,6 +863,41 @@ internal static class Program
         Check(!System.IO.Directory.Exists(
             System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ViennaBar", "drop")), "snap: wipe");
         try { System.IO.Directory.Delete(dir, true); } catch { }
+        return _failures == 0 ? 0 : 1;
+    }
+
+    private static int StageFindEx()
+    {
+        _failures = 0;
+        Log("-- findex (solo perfil/known-folders, temp)");
+        string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-findex");
+        try { System.IO.Directory.Delete(root, true); } catch { }
+        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(root, "alpha", "beta"));
+        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(root, "alfa2"));
+        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(root, "other"));
+        string hid = System.IO.Path.Combine(root, "hiddendir");
+        System.IO.Directory.CreateDirectory(hid);
+        new System.IO.DirectoryInfo(hid).Attributes |= System.IO.FileAttributes.Hidden;
+        System.IO.File.WriteAllText(System.IO.Path.Combine(root, "unarchivo.txt"), "x");
+        var list = new List<ViennaBar.FolderIndex.DirEntry>();
+        ViennaBar.FolderIndex.BuildFromRoots(new[] { root }, list);
+        Check(ViennaBar.FolderIndex.SearchIn(list, "beta").Exists(e => e.FullPath.EndsWith("alpha\\beta")), "findex: anidado");
+        Check(ViennaBar.FolderIndex.SearchIn(list, "hidden").Count == 0, "findex: ocultos fuera");
+        Check(ViennaBar.FolderIndex.SearchIn(list, "unarchivo").Count == 0, "findex: archivos fuera (solo dirs)");
+        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(root, "match"));
+        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(root, "prefix-match"));
+        list.Clear();
+        ViennaBar.FolderIndex.BuildFromRoots(new[] { root }, list);
+        var r = ViennaBar.FolderIndex.SearchIn(list, "match");
+        Check(r.Count >= 2 && r[0].Name == "match" && r[1].Name == "prefix-match", "findex: rank exacto primero");
+        Check(ViennaBar.FolderIndex.SearchIn(list, "").Count == 0, "findex: query vacia");
+        Check(ViennaBar.FolderIndex.SearchIn(list, "zzz-noexiste").Count == 0, "findex: sin match");
+        // UserRoots: existen y sin duplicados
+        var roots = ViennaBar.FolderIndex.UserRoots();
+        Check(roots.Count > 0 && roots.TrueForAll(System.IO.Directory.Exists), "findex: UserRoots existen");
+        Check(roots.Count == new HashSet<string>(roots, StringComparer.OrdinalIgnoreCase).Count,
+            "findex: UserRoots dedup");
+        try { System.IO.Directory.Delete(root, true); } catch { }
         return _failures == 0 ? 0 : 1;
     }
 

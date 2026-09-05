@@ -28,6 +28,70 @@ internal sealed class ShellTree : IDisposable
         public readonly List<TreeNode> Children = new();
     }
 
+    // ---- buscador de carpetas (arriba del tree, mismo panel) ----
+    private const float FindBoxH = 30f;
+    private readonly FolderIndex _index = new();
+    private string _findQuery = "";
+    private bool _findFocused;
+    private List<FolderIndex.DirEntry>? _findCache;
+    private int _findHover = -1;
+
+    private List<FolderIndex.DirEntry> FindResults()
+    {
+        _findCache ??= _index.Search(_findQuery);
+        return _findCache;
+    }
+
+    internal void ClearFind()
+    {
+        _findQuery = "";
+        _findFocused = false;
+        _findCache = null;
+        _findHover = -1;
+    }
+
+    private void NavigateFind(FolderIndex.DirEntry e)
+    {
+        ExpandToPath(e.FullPath);
+        ClearFind();
+        App.Instance?.Invalidate();
+    }
+
+    internal bool OnFindKey(uint msg, WPARAM wparam)
+    {
+        if (msg == WM_CHAR)
+        {
+            char c = (char)wparam.Value;
+            if (c == 27) return false;
+            if (c == '\r' || c == '\n')
+            {
+                var r = FindResults();
+                if (r.Count > 0) NavigateFind(r[0]);
+                return true;
+            }
+            if (c == '\b')
+            {
+                if (_findQuery.Length > 0) { _findQuery = _findQuery[..^1]; _findCache = null; }
+                _findFocused = true;
+                return true;
+            }
+            if (!char.IsControl(c) && _findQuery.Length < 64)
+            {
+                _findQuery += c;
+                _findCache = null;
+                _findFocused = true;
+                return true;
+            }
+            return false;
+        }
+        if (msg == WM_KEYDOWN && (int)wparam.Value == 0x1B)
+        {
+            if (_findQuery.Length > 0 || _findFocused) { ClearFind(); return true; }
+            return false;
+        }
+        return false;
+    }
+
     public void Attach(HWND hwnd)
     {
         _hwnd = hwnd;
@@ -46,9 +110,10 @@ internal sealed class ShellTree : IDisposable
         }
 
         RegisterChangeNotify();
+        _index.StartBuild();   // indice de carpetas en background (buscador)
     }
 
-    private static string DownloadsPath() =>
+    internal static string DownloadsPath() =>
         SHGetKnownFolderPath(new Guid("374DE290-123F-4565-9164-39C4925E467B"), 0, default, out var p).Succeeded
             ? p.ToString()! : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
@@ -66,6 +131,19 @@ internal sealed class ShellTree : IDisposable
 
     public void OnClick(int x, int y, int width, int height)
     {
+        if (y < FindBoxH)
+        {
+            // click en la caja: enfoca (el placeholder se oculta)
+            if (!_findFocused) { _findFocused = true; App.Instance?.Invalidate(); }
+            return;
+        }
+        if (_findQuery.Length > 0)
+        {
+            var r = FindResults();
+            int i = (int)((y - FindBoxH) / RowH);
+            if (i >= 0 && i < r.Count) NavigateFind(r[i]);
+            return;
+        }
         var node = HitTest(y, width, height);
         if (node is null) return;
         _selected = node;
@@ -146,14 +224,34 @@ internal sealed class ShellTree : IDisposable
     public void Render(RenderCtx ctx, int x, int y, int w, int h)
     {
         _treeH = h;
+        // caja de busqueda (siempre visible arriba del panel)
+        ctx.FillRect(Skin.Search, x + 4, y + 4, w - 8, 22);
+        ctx.Line(Skin.Divider, x + 4, y + 4, x + w - 4, y + 4);
+        ctx.Line(Skin.Divider, x + 4, y + 26, x + w - 4, y + 26);
+        ctx.Line(Skin.Divider, x + 4, y + 4, x + 4, y + 26);
+        ctx.Line(Skin.Divider, x + w - 4, y + 4, x + w - 4, y + 26);
+        // mini glyph de carpeta
+        ctx.FillRect(Skin.Muted, x + 10, y + 14, 12, 9);
+        ctx.FillRect(Skin.Muted, x + 10, y + 11, 6, 4);
+        bool fqEmpty = string.IsNullOrEmpty(_findQuery);
+        string shown = !fqEmpty ? _findQuery : _findFocused ? "" : "carpetas... ";
+        ctx.Text(shown, AppText.Fmt, fqEmpty && !_findFocused ? Skin.Divider : Skin.Text, x + 26, y + 7, w - 36, 14);
+        if (fqEmpty && _findFocused)
+            ctx.FillRect(Skin.Text, x + 26, y + 8, 2, 14);
+
+        if (!fqEmpty)
+        {
+            RenderFindResults(ctx, x, y, w, h);
+            return;
+        }
         var rows = VisibleNodes();
-        int visible = Math.Max(1, (int)(h / RowH));
+        int visible = Math.Max(1, (int)((h - FindBoxH) / RowH));
         _topRow = Math.Min(_topRow, Math.Max(0, rows.Count - visible));
         int last = Math.Min(_topRow + visible, rows.Count);
         for (int i = _topRow; i < last; i++)
         {
             var (node, depth) = rows[i];
-            float cy = y + 4 + (i - _topRow) * RowH;
+            float cy = y + FindBoxH + 4 + (i - _topRow) * RowH;
             if (ReferenceEquals(node, _selected) || ReferenceEquals(node, _hovered))
                 ctx.FillRect(Skin.Sel, x + 2, cy - 1, w - 8, RowH);
             string indent = new string(' ', depth * 4);
@@ -161,6 +259,33 @@ internal sealed class ShellTree : IDisposable
             ctx.Text(indent + mark + node.Name, AppText.Fmt, Skin.Text, x + 8, cy, w - 20);
         }
     }
+
+    // resultados reemplazan al tree mientras hay query
+    private void RenderFindResults(RenderCtx ctx, int x, int y, int w, int h)
+    {
+        var results = FindResults();
+        if (!_index.Ready)
+        {
+            ctx.Text("Indexando carpetas…", AppText.Fmt, Skin.Muted, x + 10, y + FindBoxH + 4, w - 20, 14);
+            _findHover = -1;
+            return;
+        }
+        int visible = Math.Max(1, (int)((h - FindBoxH) / RowH));
+        _findTop = Math.Min(_findTop, Math.Max(0, results.Count - visible));
+        int last = Math.Min(_findTop + visible, results.Count);
+        for (int i = _findTop; i < last; i++)
+        {
+            var e = results[i];
+            float cy = y + FindBoxH + 4 + (i - _findTop) * RowH;
+            if (i == _findHover)
+                ctx.FillRect(Skin.Sel, x + 2, cy - 1, w - 8, RowH);
+            ctx.Text($"{e.Name}  ·  {e.FullPath}", AppText.Fmt, Skin.Text, x + 8, cy, w - 20, 14);
+        }
+        if (results.Count == 0)
+            ctx.Text("Sin carpetas", AppText.Fmt, Skin.Muted, x + 10, y + FindBoxH + 4, w - 20, 14);
+    }
+
+    private int _findTop;
 
     // filas visibles planas (recursivo: hijos de toda expandida) para render/hit/scroll
     private List<(TreeNode node, int depth)> VisibleNodes()
@@ -188,9 +313,18 @@ internal sealed class ShellTree : IDisposable
 
     internal void ScrollBy(int lines, int height)
     {
-        int visible = Math.Max(1, height / 18);
-        int max = Math.Max(0, VisibleNodes().Count - visible);
-        _topRow = Math.Clamp(_topRow + lines, 0, max);
+        if (_findQuery.Length > 0)
+        {
+            int vis = Math.Max(1, (int)((height - FindBoxH) / RowH));
+            int m = Math.Max(0, FindResults().Count - vis);
+            _findTop = Math.Clamp(_findTop + lines, 0, m);
+        }
+        else
+        {
+            int visible = Math.Max(1, (int)((height - FindBoxH) / RowH));
+            int max = Math.Max(0, VisibleNodes().Count - visible);
+            _topRow = Math.Clamp(_topRow + lines, 0, max);
+        }
         App.Instance?.Invalidate();
     }
 

@@ -528,10 +528,14 @@ internal sealed unsafe class App : IDisposable
     private void OnKey(uint msg, WPARAM wparam)
     {
         if (_dropMenuOpen) { DropMenuKey(msg, wparam); return; }
-        if (!_drawerOpen) return;
-        bool handled = _drawer.OnKey(msg, wparam);
-        if (_drawer.ConsumeDismiss()) CloseDrawer();
-        else if (handled) { ArmDrawerTimer(); Invalidate(); }
+        if (_drawerOpen)
+        {
+            bool handled = _drawer.OnKey(msg, wparam);
+            if (_drawer.ConsumeDismiss()) CloseDrawer();
+            else if (handled) { ArmDrawerTimer(); Invalidate(); }
+            return;
+        }
+        if (_tree.OnFindKey(msg, wparam)) Invalidate();
     }
 
     private LRESULT WndProc(HWND hwnd, uint msg, WPARAM wparam, LPARAM lparam)
