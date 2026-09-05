@@ -457,6 +457,7 @@ internal sealed unsafe class App : IDisposable
     private void CloseDrawer()
     {
         _drawerOpen = false;
+        _drawer.ClearSearchFocus();
         _ = KillTimer(_hwnd, TimerDrawer);
         Invalidate();
     }

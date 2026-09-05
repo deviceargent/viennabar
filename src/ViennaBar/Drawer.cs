@@ -165,6 +165,7 @@ internal sealed class Drawer
     private List<AppCatalog.AppEntry>? _resultsCache;
     private string? _cacheSearch;
     private int _hoverIdx = -1;   // highlight de hover (no pisa _selIdx del teclado)
+    private bool _searchFocused;  // click en el box (placeholder se oculta)
 
     // BHID_SFUIObject = "GetUIObjectOf" del item â€” ruta canÃ³nica para IContextMenu
     private static readonly Guid SfUiObjectGuid = BHID_SFUIObject;
@@ -196,6 +197,7 @@ internal sealed class Drawer
                 Shell.LaunchByPidl(appsFolder, entry.Pidl);
                 Console.WriteLine($"[drawer] launch OK: {entry.Name}");
                 _dismissRequested = true;   // al invocar se cierra el menu
+                _searchFocused = false;
             }
             finally { Shell.ReleaseFolder(appsFolder); }
         }
@@ -341,6 +343,8 @@ internal sealed class Drawer
         return true;
     }
 
+    internal void ClearSearchFocus() => _searchFocused = false;
+
     public void Render(RenderCtx ctx, int x, int y, int w, int h, bool open)
     {
         RenderStartButton(ctx, x, y, w, h);
@@ -359,7 +363,9 @@ internal sealed class Drawer
         ctx.Line(Skin.Divider, 4, dy, 4, dy + SearchH);
         ctx.Line(Skin.Divider, w - 4, dy, w - 4, dy + SearchH);
         string caret = "|";
-        ctx.Text(string.IsNullOrEmpty(_search) ? "Buscar... " + caret : _search + caret, F, Skin.Text, 10, dy + 4);
+        string shown = !string.IsNullOrEmpty(_search) ? _search + caret
+            : _searchFocused ? caret : "";
+        ctx.Text(shown, F, Skin.Text, 10, dy + 4);
         dy += SearchH + 2;
 
         // filas con scroll + selecciÃ³n
