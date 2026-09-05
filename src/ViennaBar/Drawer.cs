@@ -39,7 +39,7 @@ internal sealed class Drawer
 
     public void SetDrawerArea(float h) => _drawerAreaH = h;
 
-    public void FocusSearch() { /* la ventana ya gana foco al activarse con click */ }
+    public void FocusSearch() => _searchFocused = true;   // abrir enfoca (como el Inicio de Windows)
 
     // teclado: WM_CHAR escribe, KEYDOWN navega/ejecuta. true â†’ repintar.
     public bool OnKey(uint msg, WPARAM wparam)
