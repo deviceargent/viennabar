@@ -14,6 +14,9 @@ internal sealed class Drawer
     private const float StartBtnH = 36f;
     private const float SearchH = 26f;
     private const float RowH = 18f;
+    private const float PinW = 56f;
+    private const int PinRows = 1;
+    private const float PaddingX = 8f;
 
     private readonly AppCatalog _catalog = new();
     private HWND _hwnd;
@@ -163,7 +166,7 @@ internal sealed class Drawer
         }
     }
 
-    private List<AppCatalog.AppEntry> CurrentResults()
+    internal List<AppCatalog.AppEntry> CurrentResults()
     {
         // cacheada: solo recompute al cambiar search o refrescar catÃ¡logo
         if (_resultsCache is null || _cacheSearch != _search)
@@ -368,6 +371,26 @@ internal sealed class Drawer
 
         if (!open)
         {
+            // fila de pins (config.Current.Pins) antes del drop zone
+            if (Config.Current.Pins.Any(p => p))
+            {
+                float py = y;
+                float ph = StartBtnH;
+                float pw = (w - PaddingX * 2) / 4f; // 4 pins maximo
+                for (int i = 0; i < 8; i++)
+                {
+                    if (!Config.Current.Pins[i]) continue;
+                    float cx = PaddingX + (i % 4) * (pw + PaddingX);
+                    float cy = py + (i / 4) * (ph + 4);
+                    // fondo de la celda pin
+                    ctx.FillRect(Skin.Search, cx, cy, pw, ph);
+                    // texto (nombre corto)
+                    string name = PinName(i);
+                    ctx.Text(name, F, Skin.Text, cx + 4, cy + 4, pw - 8, 14);
+                    // click = lanzar path correspondiente
+                    // (se chequea WM_LBUTTONUP en el message loop de App)
+                }
+            }
             RenderDropZone(ctx, x, y, w, (int)(y + h - StartBtnH - 4 - y - 4));
             return;
         }
@@ -411,7 +434,40 @@ internal sealed class Drawer
             ctx.FillRect(Skin.Divider, w - 6, dy, 2, trackH);
             ctx.FillRect(Skin.Text, w - 6, thumbY, 2, thumbH);
         }
+
+        // fila power (solo drawer expandido) — 5 items fijos, 72px aprox
+        if (open)
+        {
+            float powerH = 5 * RowH + 4 * 4; // 5 items + separadores
+            float py = dy + results.Count * RowH - powerH; // arriba del start button
+            if (py < y + 4) py = y + 4; // no invada el search box
+            // Apagar | Reiniciar | Suspender | Cerrar sesi | Bloquear
+            string[] powerLabels = { "Apagar", "Reiniciar", "Suspender", "Cerrar sesión", "Bloquear" };
+            float itemH = RowH;
+            for (int i = 0; i < powerLabels.Length; i++)
+            {
+                float ix = PaddingX;
+                float iy = py + i * (itemH + 4);
+                ctx.FillRect(Skin.Btn, ix, iy, w - PaddingX * 2, itemH);
+                ctx.Text(powerLabels[i], F, Skin.Text, ix + 8, iy + 2, w - PaddingX * 2 - 16, itemH);
+                // TODO: chequear WM_LBUTTONUP en App message loop y lanzar correspondiente
+            }
+        }
     }
 
     public void Dispose() => _catalog.Dispose();
+
+    private static string PinName(int idx)
+    {
+        return idx switch
+        {
+            0 => "Escritorio",
+            1 => "Documentos",
+            2 => "Descargas",
+            3 => "Imágenes",
+            4 => "Música",
+            5 => "Videos",
+            _ => "",
+        };
+    }
 }

@@ -14,6 +14,7 @@ internal sealed class Config : IDisposable
     public uint HideMs = 400;
     public string Skin = "default";
     public bool StayOpen = false;   // dev: suprime el auto-hide (fotos/tests visuales)
+    public bool[] Pins = new bool[8]; // índices: 0=Desktop,1=Docs,2=Downloads,3=Images,4=Music,5=Videos,6=null,7=null; true=visible+clickeable en drawer colapsado
 
     private static readonly string Dir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ViennaBar");
@@ -49,6 +50,28 @@ internal sealed class Config : IDisposable
             }
             if (r.TryGetProperty("stayOpen", out var so) && so.ValueKind == JsonValueKind.True)
                 c.StayOpen = true;
+            if (r.TryGetProperty("pins", out var p_arr) && p_arr.ValueKind == JsonValueKind.Array)
+            {
+                var arr = p_arr.EnumerateArray();
+                int i = 0;
+                foreach (var el in arr)
+                {
+                    if (i >= 8) break;
+                    if (el.ValueKind == JsonValueKind.String)
+                    {
+                        c.Pins[i] = !string.IsNullOrWhiteSpace(el.GetString());
+                    }
+                    else if (el.ValueKind == JsonValueKind.True)
+                    {
+                        c.Pins[i] = true;
+                    }
+                    else if (el.ValueKind == JsonValueKind.False)
+                    {
+                        c.Pins[i] = false;
+                    }
+                    i++;
+                }
+            }
         }
         catch { /* config roto: defaults quedan */ }
         return c;

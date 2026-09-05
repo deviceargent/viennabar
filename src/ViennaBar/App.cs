@@ -23,6 +23,48 @@ internal sealed unsafe class App : IDisposable
     private const uint RevealDelayMs = 80;
     private const uint HideDelayMs = 400;
 
+    // P/Invokes power (HKCU no requiere admin; UI thread STA)
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool ExitWindowsEx(uint uFlags, uint dwReason);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool LockWorkStation();
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetSuspendState(POWER_STATE state, bool fForce, bool fDisableWakeup);
+
+    private void DoPowerAction(int idx)
+    {
+        switch (idx)
+        {
+            case 0: // Apagar
+                if (ExitWindowsEx(0x00000002 | 0x00000010, 0)) AppLog("power: shutdown initiated");
+                else AppLog("power: shutdown failed, error " + Marshal.GetLastWin32Error());
+                break;
+            case 1: // Reiniciar
+                if (ExitWindowsEx(0x00000001 | 0x00000010, 0)) AppLog("power: reboot initiated");
+                else AppLog("power: reboot failed, error " + Marshal.GetLastWin32Error());
+                break;
+            case 2: // Suspender
+                SetSuspendState(POWER_STATE.Suspend, false, false);
+                AppLog("power: suspend");
+                break;
+            case 3: // Cerrar sesión
+                // No hay P/Invoke estándar sin admin; loguear y no hacer nada crítico
+                AppLog("power: logout (no implementado sin UAC)");
+                break;
+            case 4: // Bloquear estación
+                LockWorkStation();
+                AppLog("power: lock station");
+                break;
+        }
+    }
+
+    private enum POWER_STATE : uint
+    {
+        Suspend = 1,
+        Standby = 2,
+        Critical = 4
+    }
+
     private HWND _hwnd;
     private bool _hidden = true;
     private bool _drawerOpen;
@@ -476,6 +518,28 @@ internal sealed unsafe class App : IDisposable
             }
             else
             {
+                // hit-test de la fila power (drawer expandido)
+                if (_drawerOpen)
+                {
+                    int pw = Math.Max(1, (int)Math.Floor((x - 8) / (float)(FullWidthPx - 16))); // ancho approx por item
+                    // math idéntico al render: py + i * (RowH+4)
+                    int ry0 = WidgetsH + TreeH + 4; // y start of drawer content
+                    int resultsCount = Math.Max(0, _drawer.CurrentResults().Count);
+                    // py = dy + resultsCount * RowH - powerH (from Render)
+                    // dy = WidgetsH + TreeH + 4
+                    // powerH = 5 * RowH + 4 * 4
+                    int py = WidgetsH + TreeH + 4 + resultsCount * 18 - (5 * 18 + 4 * 4);
+                    int ph = 18;
+                    for (int i = 0; i < 5; i++)
+                    {
+                        int iy = py + i * (ph + 4);
+                        if (y >= iy && y < iy + ph)
+                        {
+                            DoPowerAction(i);
+                            return;
+                        }
+                    }
+                }
                 _drawer.OnClick(x, y - WidgetsH - TreeH, DrawerH);
                 if (_drawer.ConsumeDismiss()) CloseDrawer();
                 else { ArmDrawerTimer(); Invalidate(); }
