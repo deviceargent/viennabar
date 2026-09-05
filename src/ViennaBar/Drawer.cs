@@ -149,6 +149,12 @@ internal sealed class Drawer
 
     public void OnClick(int x, int y, int drawerH)
     {
+        if (y < SearchH + 2)
+        {
+            // click en la caja: enfoca (el RowAt la excluye a proposito)
+            if (!_searchFocused) { _searchFocused = true; App.Instance?.Invalidate(); }
+            return;
+        }
         int idx = RowAt(y);
         if (idx >= 0)
         {
