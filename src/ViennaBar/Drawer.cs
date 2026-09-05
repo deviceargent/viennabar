@@ -364,8 +364,10 @@ internal sealed class Drawer
         ctx.Line(Skin.Divider, w - 4, dy, w - 4, dy + SearchH);
         string caret = "|";
         bool empty = string.IsNullOrEmpty(_search);
+        // placeholder en Divider (se lee atenuado en temas claros Y oscuros;
+        // Muted sobre caja oscura parece texto normal)
         string shown = !empty ? _search + caret : _searchFocused ? "" : "Buscar... ";
-        ctx.Text(shown, F, empty && !_searchFocused ? Skin.Muted : Skin.Text, 10, dy + 4);
+        ctx.Text(shown, F, empty && !_searchFocused ? Skin.Divider : Skin.Text, 10, dy + 4);
         if (empty && _searchFocused)
             ctx.FillRect(Skin.Text, 10, dy + 5, 2, 16);   // caret pintado (activacion visible)
         dy += SearchH + 2;

@@ -425,7 +425,7 @@ internal sealed unsafe class App : IDisposable
                 if (_drawerOpen)
                 {
                     _drawer.FocusSearch();
-                    ArmDrawerTimer();
+                    ArmDrawerTimer(10000);   // gracia inicial para leer; luego 4s por interaccion
                 }
                 else _ = KillTimer(_hwnd, TimerDrawer);
                 Invalidate();
@@ -462,10 +462,10 @@ internal sealed unsafe class App : IDisposable
         Invalidate();
     }
 
-    private void ArmDrawerTimer()
+    private void ArmDrawerTimer(uint ms = 4000)
     {
         _ = KillTimer(_hwnd, TimerDrawer);
-        _ = SetTimer(_hwnd, TimerDrawer, 4000, null);
+        _ = SetTimer(_hwnd, TimerDrawer, ms, null);
     }
 
     // teclado → drawer (busqueda + navegacion). Llega porque al hacer click la
