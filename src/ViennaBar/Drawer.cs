@@ -240,11 +240,14 @@ internal sealed class Drawer
         ctx.Line(Skin.Divider, w - 4, by, w - 4, by + StartBtnH);
         // ancla del logo (futura start.png del skin)
         float ly = by + (StartBtnH - LogoPx) / 2;
-        ctx.FillRect(Skin.SheenTop, LogoX, ly, LogoPx, LogoPx);
-        ctx.Line(Skin.Divider, LogoX, ly, LogoX + LogoPx, ly);
-        ctx.Line(Skin.Divider, LogoX, ly + LogoPx, LogoX + LogoPx, ly + LogoPx);
-        ctx.Line(Skin.Divider, LogoX, ly, LogoX, ly + LogoPx);
-        ctx.Line(Skin.Divider, LogoX + LogoPx, ly, LogoX + LogoPx, ly + LogoPx);
+        if (!ctx.DrawSkinLogo(LogoX, ly, LogoPx, LogoPx))
+        {
+            ctx.FillRect(Skin.SheenTop, LogoX, ly, LogoPx, LogoPx);
+            ctx.Line(Skin.Divider, LogoX, ly, LogoX + LogoPx, ly);
+            ctx.Line(Skin.Divider, LogoX, ly + LogoPx, LogoX + LogoPx, ly + LogoPx);
+            ctx.Line(Skin.Divider, LogoX, ly, LogoX, ly + LogoPx);
+            ctx.Line(Skin.Divider, LogoX + LogoPx, ly, LogoX + LogoPx, ly + LogoPx);
+        }
         // etiqueta
         ctx.Text("Inicio", FBig, Skin.White, LogoX + LogoPx + 8, by + (StartBtnH - 18) / 2, w - 60, 18);
     }

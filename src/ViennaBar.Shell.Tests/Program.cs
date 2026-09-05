@@ -378,6 +378,26 @@ internal static class Program
             "skin: carga via fallback");
         System.IO.File.Delete(path);
         Check(ViennaBar.Skin.ResolveSkinPath("noche", appDir) == night, "skin: sin ninguno -> ruta empaquetada");
+        // packaging: seed built-in + logo path + WIC graceful-null
+        string packDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-skintest-pack");
+        ViennaBar.Skin.SeedBuiltinSkins(packDir);
+        string vn = System.IO.Path.Combine(packDir, "skins", "ViennaNight", "skin.json");
+        Check(System.IO.File.Exists(vn), "skinpack: seed crea ViennaNight");
+        var vspec = ViennaBar.Skin.LoadFromPath(vn).CacheBrushSpec.ToDictionary(t => t.Item1, t => t.Item2);
+        Check(vspec["bg"] == unchecked((int)0xFF16202C), "skinpack: ViennaNight parse");
+        System.IO.File.WriteAllText(vn, "{\"background\":\"#000099\"}");
+        ViennaBar.Skin.SeedBuiltinSkins(packDir);
+        Check(System.IO.File.ReadAllText(vn).Contains("000099"), "skinpack: seed no pisa existente");
+        Check(ViennaBar.Skin.LogoPathFor(vn) is null, "skinpack: sin start.png -> null");
+        string fakePng = System.IO.Path.Combine(packDir, "skins", "ViennaNight", "start.png");
+        System.IO.File.WriteAllText(fakePng, "no es png");
+        Check(ViennaBar.Skin.LogoPathFor(vn) == fakePng, "skinpack: logo path resuelve");
+        Check(ViennaBar.Gfx.GfxPInvoke.WicLoadPbgra32(
+            System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-noexiste-xyz.png")) is null,
+            "skinpack: WIC missing -> null");
+        Check(ViennaBar.Gfx.GfxPInvoke.WicLoadPbgra32(fakePng) is null,
+            "skinpack: WIC basura -> null");
+        try { System.IO.Directory.Delete(packDir, true); } catch { }
         return _failures == 0 ? 0 : 1;
     }
 

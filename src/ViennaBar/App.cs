@@ -219,6 +219,7 @@ internal sealed unsafe class App : IDisposable
         _drawer.Attach(_hwnd);
         AppLog("drawer attached");
         _drawer.InitText(_renderer);
+        _renderer.SetSkinLogo(Skin.ActiveLogoPath());
         // widgets: timer solo con la barra visible (Start/Stop en SetPos)
         _widgets.Start(_hwnd);
         _drawer.SetDropStack(_drop.DropStack);   // superficie drop en el drawer colapsado
@@ -780,6 +781,7 @@ internal sealed unsafe class App : IDisposable
             case WM_APP + 2:
                 // hot-reload skin: recrea brushes con tokens nuevos y repinta
                 _renderer.ReloadBrushes(_hwnd, 0, 0);
+                _renderer.SetSkinLogo(Skin.ActiveLogoPath());
                 Invalidate();
                 return default;
 
@@ -788,6 +790,7 @@ internal sealed unsafe class App : IDisposable
                 // re-aplica geometría actual y repinta
                 Skin.LoadDefault();
                 _renderer.ReloadBrushes(_hwnd, 0, 0);
+                _renderer.SetSkinLogo(Skin.ActiveLogoPath());
                 SetPos(_hidden ? SliverPx : FullWidthPx, _hidden);
                 Invalidate();
                 return default;

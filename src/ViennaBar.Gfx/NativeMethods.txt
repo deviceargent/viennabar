@@ -18,3 +18,14 @@ D2D1_FACTORY_TYPE
 D2D1_DRAW_TEXT_OPTIONS
 
 D2D1_ELLIPSE
+CoCreateInstance
+CLSID_WICImagingFactory
+IWICImagingFactory
+IWICBitmapDecoder
+IWICBitmapFrameDecode
+IWICFormatConverter
+GUID_WICPixelFormat32bppPBGRA
+WICDecodeOptions
+WICBitmapDitherType
+WICBitmapPaletteType
+CLSCTX

@@ -257,6 +257,36 @@ internal sealed unsafe class Renderer : IDisposable
     // ---- cache de thumbnails por path (los bitmaps viven del RT) ----
     private readonly Dictionary<string, nint> _thumbs = new();
 
+    // ---- logo del skin (start.png): un solo bitmap, lazy, con path ----
+    private nint _skinLogo;
+    private string? _skinLogoPath;
+
+    internal void SetSkinLogo(string? path)
+    {
+        ReleaseSkinLogo();
+        _skinLogoPath = path;
+    }
+
+    internal nint GetSkinLogoBmp()
+    {
+        if (_skinLogo == 0 && _skinLogoPath is not null)
+        {
+            var px = ViennaBar.Gfx.GfxPInvoke.WicLoadPbgra32(_skinLogoPath);
+            if (px is not null)
+            {
+                try { _skinLogo = CreateBitmapFromPixels(px.Value.w, px.Value.h, px.Value.buf, (uint)(px.Value.w * 4)); }
+                finally { System.Runtime.InteropServices.Marshal.FreeCoTaskMem(px.Value.buf); }
+            }
+            if (_skinLogo == 0) _skinLogoPath = null;   // no reintentar hasta proximo SetSkinLogo
+        }
+        return _skinLogo;
+    }
+
+    private void ReleaseSkinLogo()
+    {
+        if (_skinLogo != 0) { ReleaseBitmap(_skinLogo); _skinLogo = 0; }
+    }
+
     // bitmap del thumb (o 0): resuelve via Shell una vez y cachea.
     // size fijo 64: SIIG escala, D2D re-escala al dibujar.
     // Los FALLOS no se cachean: un SIIG transitorio (archivo en uso durante
@@ -283,6 +313,7 @@ internal sealed unsafe class Renderer : IDisposable
     {
         foreach (var p in _thumbs.Values) ReleaseBitmap(p);
         _thumbs.Clear();
+        ReleaseSkinLogo();   // el path queda: re-upload lazy en el proximo draw
     }
 
     public TextFormatHandle Text9Handle => new((nint)_text9);
@@ -301,6 +332,7 @@ internal sealed unsafe class Renderer : IDisposable
     public void Dispose()
     {
         PurgeThumbs();
+        ReleaseSkinLogo();
         foreach (var p in _brushes.Values) _ = ((ID2D1SolidColorBrush*)p)->Release();
         _brushes.Clear();
         if (_text9 is not null) { _ = ((IDWriteTextFormat*)_text9)->Release(); _text9 = null; }
@@ -363,6 +395,15 @@ internal unsafe struct RenderCtx
     }
 
     public nint GetThumb(string path) => _owner.GetThumb(path);
+
+    // logo del skin: dibuja si hay start.png, si no false (placeholder del caller)
+    public bool DrawSkinLogo(float x, float y, float w, float h)
+    {
+        var bmp = _owner.GetSkinLogoBmp();
+        if (bmp == 0) return false;
+        DrawBitmap(bmp, x, y, w, h);
+        return true;
+    }
 
     // upload de pixeles BGRA premultiplicados gestionado por el caller
     // (thumbs del portapapeles): el buffer se pinnea solo durante el upload.

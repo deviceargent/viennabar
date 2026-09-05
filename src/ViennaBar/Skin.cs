@@ -34,15 +34,65 @@ internal sealed class Skin : IDisposable
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ViennaBar");
 
     private FileSystemWatcher? _watcher;
+    private FileSystemWatcher? _watcherLogo;
     private string _path = "";
 
     public static Skin LoadDefault()
     {
+        SeedBuiltinSkins(SkinDir);
         var old = Current;
         Current = LoadFromPath(ResolveSkinPath(Config.Current.Skin, SkinDir));
         Current.Watch();
         try { old.Dispose(); } catch { }   // watcher del skin anterior (si hubo switch)
         return Current;
+    }
+
+    // skins built-in empaquetados (sin copiar nada a mano). Idempotente y
+    // testeable: solo escribe si falta.
+    internal const string ViennaNightJson = """
+        {
+          "background": "#16202C",
+          "text": "#E8F0F7",
+          "muted": "#8AA0B4",
+          "divider": "#2A4A64",
+          "selection": "#1E4A6B",
+          "button": "#2E7CC4",
+          "white": "#FFFFFF",
+          "search": "#1E2C3A",
+          "sheenTop": "#1C303F"
+        }
+        """;
+
+    internal static void SeedBuiltinSkins(string appDir)
+    {
+        try
+        {
+            string dir = Path.Combine(appDir, "skins", "ViennaNight");
+            Directory.CreateDirectory(dir);
+            string target = Path.Combine(dir, "skin.json");
+            if (!File.Exists(target))
+                File.WriteAllText(target, ViennaNightJson);
+        }
+        catch { }
+    }
+
+    // logo del boton Inicio: skins/<activo>/start.png (o legacy). null = placeholder.
+    internal static string? LogoPathFor(string skinJsonPath)
+    {
+        try
+        {
+            string? dir = Path.GetDirectoryName(skinJsonPath);
+            if (string.IsNullOrEmpty(dir)) return null;
+            string candidate = Path.Combine(dir, "start.png");
+            return File.Exists(candidate) ? candidate : null;
+        }
+        catch { return null; }
+    }
+
+    internal static string? ActiveLogoPath()
+    {
+        try { return LogoPathFor(Current._path); }
+        catch { return null; }
     }
 
     // packaging: skins/<nombre>/skin.json, fallback al legacy skin.json.
@@ -122,6 +172,15 @@ internal sealed class Skin : IDisposable
                 // refresco de brushes + repaint desde el hilo UI
                 App.Instance?.ReloadSkin(this);
             };
+            _watcherLogo = new FileSystemWatcher(dir, "start.png")
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName,
+                EnableRaisingEvents = true,
+            };
+            _watcherLogo.Changed += (_, _) => App.Instance?.ReloadSkin(this);
+            _watcherLogo.Created += (_, _) => App.Instance?.ReloadSkin(this);
+            _watcherLogo.Deleted += (_, _) => App.Instance?.ReloadSkin(this);
+            _watcherLogo.Renamed += (_, _) => App.Instance?.ReloadSkin(this);
         }
         catch { /* sin watcher: hot-reload off, skin estático */ }
     }
@@ -140,5 +199,9 @@ internal sealed class Skin : IDisposable
         ("search", _search),
     };
 
-    public void Dispose() => _watcher?.Dispose();
+    public void Dispose()
+    {
+        _watcher?.Dispose();
+        _watcherLogo?.Dispose();
+    }
 }
