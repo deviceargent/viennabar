@@ -319,6 +319,7 @@ internal sealed unsafe class App : IDisposable
             {
                 AppLog($"defer: {paths.Count} sobre carpeta {node.Name}");
                 _pendingDrop = (paths, node.ParsingName);
+                _dropMenuAt = (pt.X, pt.Y);
                 _ = PostMessage(_hwnd, WM_APP + 4, 0, 0); // WM_APP+4 = drop menu
                 return;
             }
@@ -326,58 +327,93 @@ internal sealed unsafe class App : IDisposable
         _drop.StackPaths(paths);
     }
 
-    private void ShowDropMenu(List<string> paths, string dest)
+    // ---- menu deferral PROPIO (D2D, sin TrackPopupMenu) ----
+    // Razon: el menu nativo programatico necesita foreground (que el
+    // anti-focus-stealing niega) y el puente AttachThreadInput puede wedgiar
+    // el hilo UI contra un thread colgado. El menu propio solo usa nuestro
+    // WndProc: imposible de bloquear desde otro proceso.
+    private bool _dropMenuOpen;
+    private (int x, int y) _dropMenuAt;
+    private int _dropMenuSel;
+    private const float DropMenuW = 190f;
+    private const float DropMenuRowH = 26f;
+
+    private void ShowDropMenu()
     {
-        var hmenu = CreatePopupMenu();
-        fixed (char* m1 = "Mover aquí", m2 = "Copiar aquí", m3 = "Apilar")
-        {
-            _ = AppendMenu(hmenu, default, 1, m1);
-            _ = AppendMenu(hmenu, default, 2, m2);
-            _ = AppendMenu(hmenu, default, 3, m3);
-        }
-        // menu programatico (sin click previo que active): SetForegroundWindow
-        // es OBLIGATORIO o el menu aparece muerto (no recibe input). Como somos
-        // proceso de fondo, el anti-focus-stealing lo niega: puente con
-        // AttachThreadInput al thread foreground (patron documentado).
-        // WM_NULL post-cierre evita el menu fantasma.
-        try
-        {
-            var fg = GetForegroundWindow();
-            if (!fg.IsNull)
-            {
-                uint fgId = GetWindowThreadProcessId(fg, null);
-                uint ourId = GetWindowThreadProcessId(_hwnd, null);
-                if (fgId != ourId && ourId != 0)
-                {
-                    _ = AttachThreadInput(ourId, fgId, true);
-                    _ = SetForegroundWindow(_hwnd);
-                    _ = AttachThreadInput(ourId, fgId, false);
-                }
-                else _ = SetForegroundWindow(_hwnd);
-            }
-        }
-        catch { }
-        _ = GetCursorPos(out var pt);
-        int cmd = TrackPopupMenu(hmenu,
-            TRACK_POPUP_MENU_FLAGS.TPM_RETURNCMD | TRACK_POPUP_MENU_FLAGS.TPM_RIGHTBUTTON,
-            pt.X, pt.Y, 0, _hwnd, null);
-        _ = DestroyMenu(hmenu);
-        _ = PostMessage(_hwnd, 0, 0, 0);   // WM_NULL
+        if (_pendingDrop is null) return;
+        _pressIdx = -1;
+        _drawer.SetPressedItem(-1);
+        _dropMenuOpen = true;
+        _dropMenuSel = 0;
+        _ = SetCapture(_hwnd);
+        Invalidate();
+    }
+
+    private int DropMenuRows => 3;
+
+    private (float x, float y, float w, float h) DropMenuRect()
+    {
+        float w = DropMenuW;
+        float h = 12 + DropMenuRows * DropMenuRowH;
+        float x = Math.Clamp(_dropMenuAt.Item1 - 20, 4, FullWidthPx - w - 4);
+        float y = Math.Clamp(_dropMenuAt.Item2 - 10, WidgetsH + 4, ClientH - h - 4);
+        return (x, y, w, h);
+    }
+
+    private int DropMenuHitTest(int x, int y)
+    {
+        var (mx, my, mw, mh) = DropMenuRect();
+        if (x < mx || x >= mx + mw || y < my + 6 || y >= my + mh - 6) return -1;
+        int row = (int)((y - (my + 6)) / DropMenuRowH);
+        return row >= 0 && row < DropMenuRows ? row : -1;
+    }
+
+    private void CloseDropMenu() => _ = CloseDropMenu(0);
+
+    // cmd: 0=cancelar, 1=mover, 2=copiar, 3=apilar
+    private bool CloseDropMenu(int cmd)
+    {
+        if (!_dropMenuOpen) return false;
+        _dropMenuOpen = false;
+        ReleaseCapture();
+        var pd = _pendingDrop;
+        _pendingDrop = null;
+        if (pd is null) { Invalidate(); return true; }
         if (cmd == 1 || cmd == 2)
         {
             // UI de progreso del shell + deshacer (ALLOWUNDO); el tree se
             // refresca solo via SHChangeNotify
             int rc = Shell.FileOperation((nint)_hwnd.Value, cmd == 1 ? Shell.FO_MOVE : Shell.FO_COPY,
-                paths, dest, Shell.FOF_ALLOWUNDO);
-            AppLog($"dropmenu: cmd={cmd} dest={dest} rc=0x{rc:X}");
-            if (rc == 0) _tree.ExpandToPath(dest);   // feedback: mostrar el destino
+                pd.Value.paths, pd.Value.dest, Shell.FOF_ALLOWUNDO);
+            AppLog($"dropmenu: cmd={cmd} dest={pd.Value.dest} rc=0x{rc:X}");
+            if (rc == 0) _tree.ExpandToPath(pd.Value.dest);   // feedback: mostrar el destino
         }
         else if (cmd == 3)
         {
-            _drop.StackPaths(paths);
+            _drop.StackPaths(pd.Value.paths);
         }
         else AppLog("dropmenu: cancelado");
         Invalidate();
+        return true;
+    }
+
+    private void PaintDropMenu(RenderCtx ctx)
+    {
+        if (!_dropMenuOpen) return;
+        var (mx, my, mw, mh) = DropMenuRect();
+        ctx.FillRect(Skin.Search, mx, my, mw, mh);
+        ctx.Line(Skin.Divider, mx, my, mx + mw, my);
+        ctx.Line(Skin.Divider, mx, my + mh, mx + mw, my + mh);
+        ctx.Line(Skin.Divider, mx, my, mx, my + mh);
+        ctx.Line(Skin.Divider, mx + mw, my, mx + mw, my + mh);
+        string[] items = ["Mover aquí", "Copiar aquí", "Apilar"];
+        for (int i = 0; i < items.Length; i++)
+        {
+            float ry = my + 6 + i * DropMenuRowH;
+            if (i == _dropMenuSel)
+                ctx.FillRect(Skin.Sel, mx + 4, ry - 1, mw - 8, DropMenuRowH);
+            ctx.Text(items[i], AppText.FmtBig, Skin.Text, mx + 12, ry + 3, mw - 24, 18);
+        }
     }
 
     // ---- drag-out del Drop Stack ----
@@ -475,10 +511,22 @@ internal sealed unsafe class App : IDisposable
         _ = SetTimer(_hwnd, TimerDrawer, ms, null);
     }
 
+    // teclado del menu deferral (cuando esta abierto consume todo)
+    private void DropMenuKey(uint msg, WPARAM wparam)
+    {
+        if (msg != WM_KEYDOWN) return;
+        int vk = (int)wparam.Value;
+        if (vk == 0x26) { _dropMenuSel = (_dropMenuSel + 2) % 3; Invalidate(); }        // UP
+        else if (vk == 0x28) { _dropMenuSel = (_dropMenuSel + 1) % 3; Invalidate(); }   // DOWN
+        else if (vk == 0x0D) CloseDropMenu(_dropMenuSel + 1);                            // ENTER
+        else if (vk == 0x1B) CloseDropMenu(0);                                          // ESC
+    }
+
     // teclado → drawer (busqueda + navegacion). Llega porque al hacer click la
     // ventana se activa y gana foco.
     private void OnKey(uint msg, WPARAM wparam)
     {
+        if (_dropMenuOpen) { DropMenuKey(msg, wparam); return; }
         if (!_drawerOpen) return;
         bool handled = _drawer.OnKey(msg, wparam);
         if (_drawer.ConsumeDismiss()) CloseDrawer();
@@ -527,6 +575,7 @@ internal sealed unsafe class App : IDisposable
                         // solo ocultar si el cursor salio de verdad (y no en modo foto)
                         if (!_hidden && !Config.Current.StayOpen && !CursorInsideWindow())
                         {
+                            CloseDropMenu(0);
                             SetPos(SliverPx, hidden: true);
                         }
                         break;
@@ -550,6 +599,13 @@ internal sealed unsafe class App : IDisposable
             case WM_LBUTTONUP:
             {
                 AppLog($"click L at {GET_X_LPARAM(lparam)},{GET_Y_LPARAM(lparam)} (widgetsH={WidgetsH}, treeH={TreeH})");
+                if (_dropMenuOpen)
+                {
+                    // menu deferral: UP dentro de una fila ejecuta, afuera cancela
+                    int row = DropMenuHitTest(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+                    CloseDropMenu(row >= 0 ? row + 1 : 0);
+                    return default;
+                }
                 if (_pressIdx >= 0)
                 {
                     // press de drag-out sin movimiento: no-op (no togglear nada)
@@ -590,7 +646,12 @@ internal sealed unsafe class App : IDisposable
             }
 
             case WM_MOUSEMOVE:
-                if (_pressIdx >= 0)
+                if (_dropMenuOpen)
+                {
+                    int row = DropMenuHitTest(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+                    if (row >= 0 && row != _dropMenuSel) { _dropMenuSel = row; Invalidate(); }
+                }
+                else if (_pressIdx >= 0)
                 {
                     int px = GET_X_LPARAM(lparam), py = GET_Y_LPARAM(lparam);
                     int dx = px - _pressPt.Item1, dy = py - _pressPt.Item2;
@@ -658,11 +719,8 @@ internal sealed unsafe class App : IDisposable
 
             case WM_APP + 4:
             {
-                // drop deferral: menu Mover/Copiar/Apilar (paths ya extraidos
-                // en el OnDrop; el IDataObject* original ya no es valido aqui)
-                var pd = _pendingDrop;
-                _pendingDrop = null;
-                if (pd is not null) ShowDropMenu(pd.Value.paths, pd.Value.dest);
+                // drop deferral: abre el menu propio (lee el stash al cerrar)
+                if (_pendingDrop is not null) ShowDropMenu();
                 return default;
             }
 
@@ -681,6 +739,8 @@ internal sealed unsafe class App : IDisposable
             }
 
             case WM_CAPTURECHANGED:
+                // menu abierto sin capture = cancelar; si no, cancelar press
+                if (_dropMenuOpen) { CloseDropMenu(0); return default; }
                 // perdida de capture ajena (p.ej. ventana popup): cancelar press
                 _pressIdx = -1;
                 _drawer.SetPressedItem(-1);
@@ -765,6 +825,7 @@ internal sealed unsafe class App : IDisposable
             _tree.Render(ctx, 0, WidgetsH, FullWidthPx, TreeH);
             _drawer.SetDrawerArea(DrawerH);
             _drawer.Render(ctx, 0, WidgetsH + TreeH, FullWidthPx, DrawerH, _drawerOpen);
+            PaintDropMenu(ctx);
         });
     }
 

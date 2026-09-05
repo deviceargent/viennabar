@@ -159,7 +159,20 @@ internal sealed unsafe class Renderer : IDisposable
         _rt->BeginDraw();
         var ctx = new RenderCtx(this);
         scene(ctx);
-        _ = _rt->EndDraw(null, null);
+        // Si el device se perdio (TDR, sleep/wake, cambio de GPU), D2D pinta
+        // negro para siempre: resetear todo lo que vive del RT. Lo proximo
+        // se recrea lazy (Resize/brushes/thumbs).
+        int hr = (int)_rt->EndDraw(null, null);
+        if (hr == unchecked((int)0x8899000C))   // D2DERR_RECREATE_TARGET
+        {
+            AppLog("gfx: device lost, reseteando RT");
+            PurgeThumbs();
+            foreach (var p in _brushes.Values) _ = ((ID2D1SolidColorBrush*)p)->Release();
+            _brushes.Clear();
+            _ = ((ID2D1HwndRenderTarget*)_rt)->Release();
+            _rt = null;
+            _w = 0; _h = 0;
+        }
     }
 
     internal ID2D1SolidColorBrush* BrushPtr(string name) =>
