@@ -41,6 +41,12 @@ internal sealed class Drawer
 
     public void FocusSearch() { /* no-op: el search se activa SOLO con click */ }
 
+    // enfoca si la y drawer-local cae en la caja (para el click que ABRE)
+    internal void FocusBoxIfHit(int y)
+    {
+        if (y >= 0 && y < SearchH + 2) _searchFocused = true;
+    }
+
     // teclado: WM_CHAR escribe, KEYDOWN navega/ejecuta. true â†’ repintar.
     public bool OnKey(uint msg, WPARAM wparam)
     {
@@ -346,8 +352,6 @@ internal sealed class Drawer
     }
 
     internal void ClearSearchFocus() => _searchFocused = false;
-
-    internal bool IsSearchFocused => _searchFocused;
 
     public void Render(RenderCtx ctx, int x, int y, int w, int h, bool open)
     {

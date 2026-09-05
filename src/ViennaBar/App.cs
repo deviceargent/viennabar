@@ -421,10 +421,13 @@ internal sealed unsafe class App : IDisposable
         {
             if (y >= ClientH - 40 || !_drawerOpen)
             {
+                bool wasOpen = _drawerOpen;
                 _drawerOpen = !_drawerOpen;
                 if (_drawerOpen)
                 {
-                    _drawer.FocusSearch();
+                    // si el click que abre cae en la caja, enfoca de una
+                    // (si no, el toggle se come el click de foco)
+                    if (!wasOpen) _drawer.FocusBoxIfHit(y - WidgetsH - TreeH);
                     ArmDrawerTimer(10000);   // gracia inicial para leer; luego 4s por interaccion
                 }
                 else
@@ -533,9 +536,9 @@ internal sealed unsafe class App : IDisposable
                         _drop.PruneMissing();
                         break;
 
-                    case TimerDrawer: // auto-close del drawer (solo si no hay foco activo)
+                    case TimerDrawer: // auto-close del drawer (siempre: mata hasta el foco)
                         _ = KillTimer(hwnd, TimerDrawer);
-                        if (_drawerOpen && !_drawer.IsSearchFocused)
+                        if (_drawerOpen)
                         {
                             _drawerOpen = false;
                             Invalidate();
