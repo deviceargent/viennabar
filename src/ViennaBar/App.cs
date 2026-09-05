@@ -427,7 +427,11 @@ internal sealed unsafe class App : IDisposable
                     _drawer.FocusSearch();
                     ArmDrawerTimer(10000);   // gracia inicial para leer; luego 4s por interaccion
                 }
-                else _ = KillTimer(_hwnd, TimerDrawer);
+                else
+                {
+                    _drawer.ClearSearchFocus();
+                    _ = KillTimer(_hwnd, TimerDrawer);
+                }
                 Invalidate();
             }
             else
@@ -529,9 +533,9 @@ internal sealed unsafe class App : IDisposable
                         _drop.PruneMissing();
                         break;
 
-                    case TimerDrawer: // auto-close del drawer (idle)
+                    case TimerDrawer: // auto-close del drawer (solo si no hay foco activo)
                         _ = KillTimer(hwnd, TimerDrawer);
-                        if (_drawerOpen)
+                        if (_drawerOpen && !_drawer.IsSearchFocused)
                         {
                             _drawerOpen = false;
                             Invalidate();

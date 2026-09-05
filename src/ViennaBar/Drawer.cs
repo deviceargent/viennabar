@@ -39,7 +39,7 @@ internal sealed class Drawer
 
     public void SetDrawerArea(float h) => _drawerAreaH = h;
 
-    public void FocusSearch() => _searchFocused = true;   // abrir enfoca (como el Inicio de Windows)
+    public void FocusSearch() { /* no-op: el search se activa SOLO con click */ }
 
     // teclado: WM_CHAR escribe, KEYDOWN navega/ejecuta. true â†’ repintar.
     public bool OnKey(uint msg, WPARAM wparam)
@@ -57,12 +57,14 @@ internal sealed class Drawer
             {
                 if (_search.Length > 0) _search = _search[..^1];
                 _selIdx = 0; _topRow = 0; _resultsCache = null;
+                _searchFocused = true;   // escribir es activar
                 return true;
             }
             if (!char.IsControl(c) && _search.Length < 64)
             {
                 _search += c;
                 _selIdx = 0; _topRow = 0; _resultsCache = null;
+                _searchFocused = true;   // escribir es activar
                 return true;
             }
             return false;
@@ -344,6 +346,8 @@ internal sealed class Drawer
     }
 
     internal void ClearSearchFocus() => _searchFocused = false;
+
+    internal bool IsSearchFocused => _searchFocused;
 
     public void Render(RenderCtx ctx, int x, int y, int w, int h, bool open)
     {
