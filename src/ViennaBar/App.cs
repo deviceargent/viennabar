@@ -886,6 +886,14 @@ internal sealed unsafe class App : IDisposable
             // sheen Vienna (mitad superior con gradiente): F2 con DComp; F1 dos tonos
             ctx.FillRect(unchecked((int)0xFFC8E0EE), 0, 0, FullWidthPx, WidgetsH / 2f);
 
+            // --- Overlay glass falso (solo D2D, sin DWM blur) ---
+            if (Config.Current.GlassOverlayEnabled)
+            {
+                // Overlay superior semitransparente (alpha ~0.35, color blanco suave)
+                ctx.FillRect(unchecked((int)0xAADDDCFF), 0, 0, FullWidthPx, WidgetsH / 2f);
+                // Nota: ARGB = 0xAADDDCFF -> Alpha=0.35 (0xAA), Color=DDDCCF
+            }
+
             // divisores
             ctx.Line(Skin.Divider, 0, WidgetsH, FullWidthPx, WidgetsH);
             ctx.Line(Skin.Divider, 0, WidgetsH + TreeH, FullWidthPx, WidgetsH + TreeH);

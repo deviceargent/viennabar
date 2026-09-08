@@ -257,6 +257,12 @@ internal sealed class ShellTree : IDisposable
             string indent = new string(' ', depth * 4);
             string mark = node.IsFolder ? (node.Expanded ? "- " : "+ ") : "  ";
             ctx.Text(indent + mark + node.Name, AppText.Fmt, Skin.Text, x + 8, cy, w - 20);
+            // Overlay separador semitransparente entre filas (solo cuando hay多于 una fila visible)
+            if (i < last - 1 && Config.Current.GlassOverlayEnabled)
+            {
+                // alpha ~0.2: 0x33000000
+                ctx.FillRect(unchecked((int)0x33000000), x + 2, cy + RowH, w - 8, 1);
+            }
         }
     }
 

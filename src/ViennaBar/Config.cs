@@ -15,6 +15,7 @@ internal sealed class Config : IDisposable
     public string Skin = "default";
     public bool StayOpen = false;   // dev: suprime el auto-hide (fotos/tests visuales)
     public bool[] Pins = new bool[8]; // índices: 0=Desktop,1=Docs,2=Downloads,3=Images,4=Music,5=Videos,6=null,7=null; true=visible+clickeable en drawer colapsado
+    public bool GlassOverlayEnabled = true; // alternar overlays semitransparentes (false para desactivar)
 
     private static readonly string Dir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ViennaBar");
@@ -50,6 +51,10 @@ internal sealed class Config : IDisposable
             }
             if (r.TryGetProperty("stayOpen", out var so) && so.ValueKind == JsonValueKind.True)
                 c.StayOpen = true;
+            if (r.TryGetProperty("glassOverlay", out var go) && go.ValueKind == JsonValueKind.True)
+                c.GlassOverlayEnabled = true;
+            else if (r.TryGetProperty("glassOverlay", out var gf) && gf.ValueKind == JsonValueKind.False)
+                c.GlassOverlayEnabled = false;
             if (r.TryGetProperty("pins", out var p_arr) && p_arr.ValueKind == JsonValueKind.Array)
             {
                 var arr = p_arr.EnumerateArray();

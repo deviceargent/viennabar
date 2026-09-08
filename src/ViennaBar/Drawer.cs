@@ -369,8 +369,14 @@ internal sealed class Drawer
     {
         RenderStartButton(ctx, x, y, w, h);
 
-        if (!open)
+if (!open)
         {
+            // Overlay semitransparente en drawer colapsado (fondo suave que refuerza la sensacion de panel)
+            if (Config.Current.GlassOverlayEnabled)
+            {
+                // alpha ~0.13, negro puro: 0x22000000
+                ctx.FillRect(unchecked((int)0x22000000), 0, 0, w, StartBtnH + 4);
+            }
             // fila de pins (config.Current.Pins) antes del drop zone
             if (Config.Current.Pins.Any(p => p))
             {
