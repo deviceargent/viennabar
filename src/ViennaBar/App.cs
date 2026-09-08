@@ -835,12 +835,6 @@ internal sealed unsafe class App : IDisposable
 
             case WM_KEYDOWN:
                 OnKey(WM_KEYDOWN, wparam);
-                // hotkey: pulsar 'T' para rotar de tema (simple y sin dependencias extra)
-                if ((int)wparam.Value == 0x54) // 'T'
-                {
-                    RotateSkin();
-                    Invalidate();
-                }
                 return default;
 
             case WM_RBUTTONUP:
@@ -894,30 +888,6 @@ internal sealed unsafe class App : IDisposable
                 return default;
         }
         return DefWindowProc(hwnd, msg, wparam, lparam);
-    }
-
-    private void RotateSkin()
-    {
-        string[] skins = { "default", "ViennaNight", "ViennaDusk" };
-        string current = Config.Current.Skin;
-        int nextIdx = Array.IndexOf(skins, current) + 1;
-        if (nextIdx >= skins.Length) nextIdx = 0;
-        Config.Current.Skin = skins[nextIdx];
-        // persistir inmediatamente para que el watcher no lo pierda
-        var dir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var cfgPath = Path.Combine(dir, "ViennaBar", "config.json");
-        var json = System.Text.Json.JsonSerializer.Serialize(new
-        {
-            width = Config.Current.Width,
-            revealMs = Config.Current.RevealMs,
-            hideMs = Config.Current.HideMs,
-            skin = Config.Current.Skin,
-            stayOpen = Config.Current.StayOpen,
-            glassOverlay = Config.Current.GlassOverlayEnabled,
-            Pins = Config.Current.Pins
-        });
-        File.WriteAllText(cfgPath, json);
-        App.AppLog($"skin rotado a: {Config.Current.Skin}");
     }
 
     private void PaintScene()
