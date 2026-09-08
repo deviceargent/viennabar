@@ -30,18 +30,32 @@ internal sealed unsafe class App : IDisposable
     private static extern bool LockWorkStation();
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetSuspendState(POWER_STATE state, bool fForce, bool fDisableWakeup);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int MessageBoxW(IntPtr hWnd, string lpText, string lpCaption, uint uType);
 
     private void DoPowerAction(int idx)
     {
+        const uint MB_YESNO = 0x00000004;
+        const uint MB_ICONQUESTION = 0x00000020;
+        const uint MB_DEFBUTTON1 = 0x00000000;
+
         switch (idx)
         {
             case 0: // Apagar
-                if (ExitWindowsEx(0x00000002 | 0x00000010, 0)) AppLog("power: shutdown initiated");
-                else AppLog("power: shutdown failed, error " + Marshal.GetLastWin32Error());
+                if (MessageBoxW(IntPtr.Zero, "¿Estás seguro de apagar ViennaBar?", "Confirmar", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1) == 6) // IDYES
+                {
+                    if (ExitWindowsEx(0x00000002 | 0x00000010, 0)) AppLog("power: shutdown initiated");
+                    else AppLog("power: shutdown failed, error " + Marshal.GetLastWin32Error());
+                }
+                else AppLog("power: shutdown cancelled by user");
                 break;
             case 1: // Reiniciar
-                if (ExitWindowsEx(0x00000001 | 0x00000010, 0)) AppLog("power: reboot initiated");
-                else AppLog("power: reboot failed, error " + Marshal.GetLastWin32Error());
+                if (MessageBoxW(IntPtr.Zero, "¿Estás seguro de reiniciar ViennaBar?", "Confirmar", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1) == 6) // IDYES
+                {
+                    if (ExitWindowsEx(0x00000001 | 0x00000010, 0)) AppLog("power: reboot initiated");
+                    else AppLog("power: reboot failed, error " + Marshal.GetLastWin32Error());
+                }
+                else AppLog("power: reboot cancelled by user");
                 break;
             case 2: // Suspender
                 SetSuspendState(POWER_STATE.Suspend, false, false);
@@ -821,6 +835,12 @@ internal sealed unsafe class App : IDisposable
 
             case WM_KEYDOWN:
                 OnKey(WM_KEYDOWN, wparam);
+                // hotkey: pulsar 'T' para rotar de tema (simple y sin dependencias extra)
+                if ((int)wparam.Value == 0x54) // 'T'
+                {
+                    RotateSkin();
+                    Invalidate();
+                }
                 return default;
 
             case WM_RBUTTONUP:
@@ -874,6 +894,30 @@ internal sealed unsafe class App : IDisposable
                 return default;
         }
         return DefWindowProc(hwnd, msg, wparam, lparam);
+    }
+
+    private void RotateSkin()
+    {
+        string[] skins = { "default", "ViennaNight", "ViennaDusk" };
+        string current = Config.Current.Skin;
+        int nextIdx = Array.IndexOf(skins, current) + 1;
+        if (nextIdx >= skins.Length) nextIdx = 0;
+        Config.Current.Skin = skins[nextIdx];
+        // persistir inmediatamente para que el watcher no lo pierda
+        var dir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var cfgPath = Path.Combine(dir, "ViennaBar", "config.json");
+        var json = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            width = Config.Current.Width,
+            revealMs = Config.Current.RevealMs,
+            hideMs = Config.Current.HideMs,
+            skin = Config.Current.Skin,
+            stayOpen = Config.Current.StayOpen,
+            glassOverlay = Config.Current.GlassOverlayEnabled,
+            Pins = Config.Current.Pins
+        });
+        File.WriteAllText(cfgPath, json);
+        App.AppLog($"skin rotado a: {Config.Current.Skin}");
     }
 
     private void PaintScene()

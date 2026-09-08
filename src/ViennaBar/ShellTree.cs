@@ -366,7 +366,11 @@ internal sealed class ShellTree : IDisposable
     private TreeNode? HitTest(int y, int width, int height)
     {
         var rows = VisibleNodes();
-        int idx = (int)(y / RowH) + _topRow;
+        // El render pinta filas empezando en: y + FindBoxH + 4
+        // El hit test debe compensar ese mismo offset para mapear el índice correcto.
+        int offset = (int)(FindBoxH + 4);  // 34 píxeles
+        int relY = y - offset;
+        int idx = (int)Math.Floor((double)relY / RowH) + _topRow;
         if (idx < 0 || idx >= rows.Count) return null;
         return rows[idx].node;
     }
