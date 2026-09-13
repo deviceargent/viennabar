@@ -17,6 +17,8 @@ internal sealed class Drawer
     private const float PinW = 56f;
     private const int PinRows = 1;
     private const float PaddingX = 8f;
+    private const float StartBtnW = 128f;    // ancho del botón Inicio (ya no todo el ancho)
+    private const float PowerIconW = 24f;    // ancho de cada icono de apagado
 
     private readonly AppCatalog _catalog = new();
     private HWND _hwnd;
@@ -234,13 +236,13 @@ internal sealed class Drawer
     private void RenderStartButton(RenderCtx ctx, int x, int y, int w, int h)
     {
         float by = y + h - StartBtnH - 4;
-        // cuerpo
-        ctx.FillRect(Skin.Btn, 4, by, w - 8, StartBtnH);
+        // cuerpo (ancho reducido: deja espacio a los iconos de apagado)
+        ctx.FillRect(Skin.StartBtn, 4, by, StartBtnW, StartBtnH);
         // relieve clasico: luz arriba/izq, sombra abajo/der
-        ctx.Line(Skin.White, 4, by, w - 4, by);
+        ctx.Line(Skin.White, 4, by, 4 + StartBtnW, by);
         ctx.Line(Skin.White, 4, by, 4, by + StartBtnH);
-        ctx.Line(Skin.Divider, 4, by + StartBtnH, w - 4, by + StartBtnH);
-        ctx.Line(Skin.Divider, w - 4, by, w - 4, by + StartBtnH);
+        ctx.Line(Skin.Divider, 4, by + StartBtnH, 4 + StartBtnW, by + StartBtnH);
+        ctx.Line(Skin.Divider, 4 + StartBtnW, by, 4 + StartBtnW, by + StartBtnH);
         // ancla del logo (futura start.png del skin)
         float ly = by + (StartBtnH - LogoPx) / 2;
         if (!ctx.DrawSkinLogo(LogoX, ly, LogoPx, LogoPx))
@@ -251,8 +253,73 @@ internal sealed class Drawer
             ctx.Line(Skin.Divider, LogoX, ly, LogoX, ly + LogoPx);
             ctx.Line(Skin.Divider, LogoX + LogoPx, ly, LogoX + LogoPx, ly + LogoPx);
         }
-        // etiqueta
-        ctx.Text("Inicio", FBig, Skin.White, LogoX + LogoPx + 8, by + (StartBtnH - 18) / 2, w - 60, 18);
+        // etiqueta (centrada en el ancho reducido del boton)
+        ctx.Text("Inicio", FBig, Skin.White, LogoX + LogoPx + 8, by + (StartBtnH - 18) / 2, StartBtnW - LogoPx - 20, 18);
+    }
+
+    // dibuja UN icono de apagado (geometrico, monocromo) segun el indice.
+    // 0=apagar, 1=reiniciar, 2=suspender, 3=cerrar sesion, 4=bloquear.
+    private void RenderPowerIcon(RenderCtx ctx, float cx, float cy, int idx)
+    {
+        int c = Skin.Text;   // color de linea del icono
+        float r = 8f;        // radio base
+        switch (idx)
+        {
+            case 0: // apagar: circulo + barra vertical
+                ctx.FillEllipse(c, cx, cy, r, r);
+                ctx.FillEllipse(Skin.Bg, cx, cy, r - 2.5f, r - 2.5f);  // hueco (fondo real)
+                ctx.FillRect(c, cx - 1.25f, cy - r - 2f, 2.5f, 5f);       // trazo superior
+                break;
+            case 1: // reiniciar: flecha (punta + arco sugerido)
+                ctx.Line(c, cx - r, cy - 2, cx - r, cy + 2, 2f);          // cola
+                ctx.Line(c, cx - r, cy - 2, cx - 1, cy - 2, 2f);          // punta arriba
+                ctx.Line(c, cx - r, cy + 2, cx - 1, cy + 2, 2f);          // punta abajo
+                ctx.FillEllipse(c, cx + 2, cy - 2, 1.5f, 1.5f);           // flecha (dot)
+                break;
+            case 2: // suspender: luna menguante
+                ctx.FillEllipse(c, cx, cy, r, r);
+                ctx.FillEllipse(Skin.Bg, cx + 3.5f, cy - 1f, r, r);      // recorte (fondo real)
+                break;
+            case 3: // cerrar sesion: puerta + flecha hacia fuera
+                ctx.FillRect(c, cx - 3f, cy - r, 3f, 2 * r);              // panel
+                ctx.Line(c, cx, cy, cx + 7, cy, 2f);                      // flecha
+                ctx.Line(c, cx + 7, cy, cx + 3, cy - 4, 2f);              // punta
+                ctx.Line(c, cx + 7, cy, cx + 3, cy + 4, 2f);
+                break;
+            case 4: // bloquear: candado (arco + cuerpo)
+                ctx.FillEllipse(c, cx, cy - 3, 3.5f, 4f);
+                ctx.FillEllipse(Skin.Bg, cx, cy - 3, 2f, 2.5f);          // hueco del arco (fondo real)
+                ctx.FillRect(c, cx - 4.5f, cy - 3f, 9f, 8f);              // cuerpo
+                ctx.FillEllipse(Skin.Bg, cx, cy - 1f, 1.5f, 1.5f);       // ojo de la cerradura (fondo real)
+                break;
+        }
+    }
+
+    // posicion X absoluta (de ventana) del primer icono power, a la derecha del boton Inicio.
+    private float PowerIconsX(float x) => x + 4 + StartBtnW + 16;
+
+    private const int PowerIconCount = 3;   // iconos visibles en el drawer colapsado
+
+    private ColorPicker? _picker;
+    internal void SetPicker(ColorPicker p) => _picker = p;
+
+    // hit-test de la mini rueda (elemento 4, despues de los 3 iconos power)
+    internal bool MiniWheelHitTest(float windowX, float x)
+    {
+        float ix = PowerIconsX(x) + 3 * (PowerIconW + 3);
+        return windowX >= ix && windowX < ix + PowerIconW;
+    }
+
+    // hit-test de los iconos power del drawer colapsado. -1 = no hit.
+    internal int PowerIconHitTest(float windowX, float x)
+    {
+        float ix = PowerIconsX(x);
+        for (int i = 0; i < PowerIconCount; i++)
+        {
+            float bx = ix + i * (PowerIconW + 3);
+            if (windowX >= bx && windowX < bx + PowerIconW) return i;
+        }
+        return -1;
     }
 
     // ---- superficie de drop (drawer colapsado): grid de thumbnails ----
@@ -365,17 +432,33 @@ internal sealed class Drawer
 
     internal void ClearSearchFocus() => _searchFocused = false;
 
-    public void Render(RenderCtx ctx, int x, int y, int w, int h, bool open)
+public void Render(RenderCtx ctx, int x, int y, int w, int h, bool open)
     {
         RenderStartButton(ctx, x, y, w, h);
 
-if (!open)
+        if (!open)
         {
-            // Overlay semitransparente en drawer colapsado (fondo suave que refuerza la sensacion de panel)
+            // Overlay semitransparente en drawer colapsado (fondo suave que refuerza la sensacion de panel).
+            // Debe cubrir la franja inferior del drawer (el boton Inicio), NO la parte superior de la ventana.
             if (Config.Current.GlassOverlayEnabled)
             {
-                // alpha ~0.13, negro puro: 0x22000000
-                ctx.FillRect(unchecked((int)0x22000000), 0, 0, w, StartBtnH + 4);
+                float by = y + h - StartBtnH - 4;   // misma Y del boton Inicio
+                ctx.FillRect(unchecked((int)0x22000000), x, by, w, StartBtnH + 4);
+            }
+            // ---- iconos de apagado a la derecha del boton Inicio ----
+            float icoY = y + h - StartBtnH - 4 + StartBtnH / 2f;   // centro vertical del boton Inicio
+            for (int i = 0; i < PowerLabels.Length && i < 3; i++)
+            {
+                float ix = PowerIconsX(x) + i * (PowerIconW + 3);
+                float cx = ix + PowerIconW / 2f;
+                RenderPowerIcon(ctx, cx, icoY, i);
+            }
+            // mini rueda cromática (abre el selector grande al hacer clic)
+            if (_picker is not null)
+            {
+                float wx = PowerIconsX(x) + 3 * (PowerIconW + 3);
+                int mr = (int)(PowerIconW / 2f);
+                _picker.DrawWheel(ctx, wx + mr, icoY, mr);
             }
             // fila de pins (config.Current.Pins) antes del drop zone
             if (Config.Current.Pins.Any(p => p))
@@ -440,26 +523,10 @@ if (!open)
             ctx.FillRect(Skin.Divider, w - 6, dy, 2, trackH);
             ctx.FillRect(Skin.Text, w - 6, thumbY, 2, thumbH);
         }
-
-        // fila power (solo drawer expandido) — 5 items fijos, 72px aprox
-        if (open)
-        {
-            float powerH = 5 * RowH + 4 * 4; // 5 items + separadores
-            float py = dy + results.Count * RowH - powerH; // arriba del start button
-            if (py < y + 4) py = y + 4; // no invada el search box
-            // Apagar | Reiniciar | Suspender | Cerrar sesi | Bloquear
-            string[] powerLabels = { "Apagar", "Reiniciar", "Suspender", "Cerrar sesión", "Bloquear" };
-            float itemH = RowH;
-            for (int i = 0; i < powerLabels.Length; i++)
-            {
-                float ix = PaddingX;
-                float iy = py + i * (itemH + 4);
-                ctx.FillRect(Skin.Btn, ix, iy, w - PaddingX * 2, itemH);
-                ctx.Text(powerLabels[i], F, Skin.Text, ix + 8, iy + 2, w - PaddingX * 2 - 16, itemH);
-                // TODO: chequear WM_LBUTTONUP en App message loop y lanzar correspondiente
-            }
-        }
     }
+
+    internal static readonly string[] PowerLabels =
+        { "Apagar", "Reiniciar", "Suspender", "Cerrar sesión", "Bloquear" };
 
     public void Dispose() => _catalog.Dispose();
 

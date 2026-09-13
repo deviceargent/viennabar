@@ -348,12 +348,12 @@ internal sealed class Widgets : IDisposable
     internal int CopiedIndex => _copiedIdx;
 
     // click en una linea del clip -> restaura al portapapeles (y la marca)
-    internal int ClipHitTest(int y)
-    {
-        for (int i = 0; i < _clipN; i++)
-            if (y >= _clipY0 + 15 + i * 15 && y < _clipY0 + 30 + i * 15) return i;
-        return -1;
-    }
+internal int ClipHitTest(int y)
+{
+    for (int i = 0; i < _clipN; i++)
+        if (y >= _clipY0 + 15 + i * 15 && y < _clipY0 + 15 + (i + 1) * 15) return i;
+    return -1;
+}
 
     internal void RestoreClip(int index)
     {
@@ -578,7 +578,7 @@ internal sealed class Widgets : IDisposable
         // fill (clamp)
         frac = Math.Clamp(frac, 0, 1);
         if (frac > 0.01)
-            ctx.FillRect(Skin.Btn, x, y, (float)(w * frac), h);
+            ctx.FillRect(Skin.BarFill, x, y, (float)(w * frac), h);
     }
 
     public void Dispose()

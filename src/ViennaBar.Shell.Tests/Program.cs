@@ -360,11 +360,11 @@ internal static class Program
         System.IO.File.WriteAllText(path, "{no es json");
         var broken = ViennaBar.Skin.LoadFromPath(path);
         var bspec = broken.CacheBrushSpec.ToDictionary(t => t.Item1, t => t.Item2);
-        Check(bspec["bg"] == unchecked((int)0xFFDCE9F5), "skin: json roto -> defaults");
+        Check(bspec["bg"] == unchecked((int)0xFFC6D7E6), "skin: json roto -> defaults");
         System.IO.File.Delete(path);
         var missing = ViennaBar.Skin.LoadFromPath(path);
         var mspec = missing.CacheBrushSpec.ToDictionary(t => t.Item1, t => t.Item2);
-        Check(mspec["bg"] == unchecked((int)0xFFDCE9F5), "skin: sin archivo -> defaults");
+        Check(mspec["bg"] == unchecked((int)0xFFC6D7E6), "skin: sin archivo -> defaults");
         // packaging: skins/<nombre>/ > legacy > ruta empaquetada (para crear)
         string appDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "vb-skintest");
         string night = System.IO.Path.Combine(appDir, "skins", "noche", "skin.json");

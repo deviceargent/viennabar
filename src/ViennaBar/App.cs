@@ -28,10 +28,71 @@ internal sealed unsafe class App : IDisposable
     private static extern bool ExitWindowsEx(uint uFlags, uint dwReason);
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool LockWorkStation();
-    [DllImport("user32.dll", SetLastError = true)]
+    [DllImport("powrprof.dll", SetLastError = true)]
     private static extern bool SetSuspendState(POWER_STATE state, bool fForce, bool fDisableWakeup);
-    [DllImport("user32.dll", SetLastError = true)]
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern int MessageBoxW(IntPtr hWnd, string lpText, string lpCaption, uint uType);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern short GetAsyncKeyState(int vKey);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    // ---- shutdown privilege (advapi32): necesario para ExitWindowsEx sin admin ----
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr proc, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool LookupPrivilegeValue(string? system, string name, out LUID luid);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool AdjustTokenPrivileges(IntPtr token, bool disableAll, ref TOKEN_PRIVILEGES newState, uint bufLen, IntPtr prev, IntPtr retLen);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LUID { public uint LowPart; public int HighPart; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LUID_AND_ATTRIBUTES { public LUID Luid; public uint Attributes; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TOKEN_PRIVILEGES { public uint PrivilegeCount; public LUID_AND_ATTRIBUTES Privileges; }
+
+    private const uint TOKEN_ADJUST_PRIVILEGES = 0x0020;
+    private const uint TOKEN_QUERY = 0x0008;
+    private const uint SE_PRIVILEGE_ENABLED = 0x00000002;
+
+    // EWX flags
+    private const uint EWX_LOGOFF = 0x00000000;
+    private const uint EWX_SHUTDOWN = 0x00000001;
+    private const uint EWX_REBOOT = 0x00000002;
+    private const uint EWX_FORCE = 0x00000004;
+    private const uint EWX_POWEROFF = 0x00000008;
+
+    private const int HotKeyRotateSkin = 0xB00;
+    private const uint MOD_CONTROL = 0x0002;
+    private const uint MOD_SHIFT = 0x0004;
+
+    private static bool EnableShutdownPrivilege()
+    {
+        try
+        {
+            IntPtr proc = System.Diagnostics.Process.GetCurrentProcess().Handle;
+            if (!OpenProcessToken(proc, TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, out var token))
+                return false;
+            try
+            {
+                if (!LookupPrivilegeValue(null, "SeShutdownPrivilege", out var luid))
+                    return false;
+                var tp = new TOKEN_PRIVILEGES
+                {
+                    PrivilegeCount = 1,
+                    Privileges = new LUID_AND_ATTRIBUTES { Luid = luid, Attributes = SE_PRIVILEGE_ENABLED },
+                };
+                return AdjustTokenPrivileges(token, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
+            }
+            finally { _ = Windows.Win32.PInvoke.CloseHandle(new Windows.Win32.Foundation.HANDLE(token)); }
+        }
+        catch { return false; }
+    }
 
     private void DoPowerAction(int idx)
     {
@@ -41,29 +102,36 @@ internal sealed unsafe class App : IDisposable
 
         switch (idx)
         {
-            case 0: // Apagar
-                if (MessageBoxW(IntPtr.Zero, "¿Estás seguro de apagar ViennaBar?", "Confirmar", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1) == 6) // IDYES
+            case 0: // Apagar el equipo
+                if (MessageBoxW(IntPtr.Zero, "¿Apagar el equipo?", "ViennaBar", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1) == 6)
                 {
-                    if (ExitWindowsEx(0x00000002 | 0x00000010, 0)) AppLog("power: shutdown initiated");
+                    EnableShutdownPrivilege();
+                    if (ExitWindowsEx(EWX_SHUTDOWN | EWX_POWEROFF | EWX_FORCE, 0)) AppLog("power: shutdown initiated");
                     else AppLog("power: shutdown failed, error " + Marshal.GetLastWin32Error());
                 }
-                else AppLog("power: shutdown cancelled by user");
+                else AppLog("power: shutdown cancelled");
                 break;
-            case 1: // Reiniciar
-                if (MessageBoxW(IntPtr.Zero, "¿Estás seguro de reiniciar ViennaBar?", "Confirmar", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1) == 6) // IDYES
+            case 1: // Reiniciar el equipo
+                if (MessageBoxW(IntPtr.Zero, "¿Reiniciar el equipo?", "ViennaBar", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1) == 6)
                 {
-                    if (ExitWindowsEx(0x00000001 | 0x00000010, 0)) AppLog("power: reboot initiated");
+                    EnableShutdownPrivilege();
+                    if (ExitWindowsEx(EWX_REBOOT | EWX_FORCE, 0)) AppLog("power: reboot initiated");
                     else AppLog("power: reboot failed, error " + Marshal.GetLastWin32Error());
                 }
-                else AppLog("power: reboot cancelled by user");
+                else AppLog("power: reboot cancelled");
                 break;
             case 2: // Suspender
-                SetSuspendState(POWER_STATE.Suspend, false, false);
-                AppLog("power: suspend");
+                if (MessageBoxW(IntPtr.Zero, "¿Suspender el equipo?", "ViennaBar", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1) == 6)
+                {
+                    if (SetSuspendState(POWER_STATE.Suspend, false, false)) AppLog("power: suspend initiated");
+                    else AppLog("power: suspend failed, error " + Marshal.GetLastWin32Error());
+                }
+                else AppLog("power: suspend cancelled");
                 break;
             case 3: // Cerrar sesión
-                // No hay P/Invoke estándar sin admin; loguear y no hacer nada crítico
-                AppLog("power: logout (no implementado sin UAC)");
+                EnableShutdownPrivilege();
+                if (ExitWindowsEx(EWX_LOGOFF | EWX_FORCE, 0)) AppLog("power: logout initiated");
+                else AppLog("power: logout failed, error " + Marshal.GetLastWin32Error());
                 break;
             case 4: // Bloquear estación
                 LockWorkStation();
@@ -90,6 +158,10 @@ internal sealed unsafe class App : IDisposable
     private readonly Drawer _drawer;
     private readonly Widgets _widgets = new();
     private readonly Renderer _renderer = new();
+    private readonly ColorPicker _picker = new();
+    private bool _pickerOpen;
+    private int _pickerDrag;   // 0=none, 1=slider, 2=wheel (para arrastre continuo)
+    private float _wheelCx = 140, _wheelCy = 302, _wheelR = 72;   // centro/radio de la rueda grande (default, se recalcula en paint)
 
     private int ClientH => Math.Max(1, _clientH);
     private int _clientH;
@@ -258,6 +330,8 @@ internal sealed unsafe class App : IDisposable
         AppLog("ml: setpos");
         _ = ShowWindow(_hwnd, SHOW_WINDOW_CMD.SW_SHOWNOACTIVATE);
         AppLog("ml: shown");
+        bool hk = RegisterHotKey(_hwnd, HotKeyRotateSkin, MOD_CONTROL | MOD_SHIFT, 0x54);   // Ctrl+Shift+T
+        AppLog($"ml: hotkey registered={hk} err={Marshal.GetLastWin32Error()}");
 
         _tree.Attach(_hwnd);
         AppLog("tree attached");
@@ -276,6 +350,8 @@ internal sealed unsafe class App : IDisposable
         AppLog("drawer attached");
         _drawer.InitText(_renderer);
         _renderer.SetSkinLogo(Skin.ActiveLogoPath());
+        _picker.SyncFromConfig();
+        _drawer.SetPicker(_picker);
         // widgets: timer solo con la barra visible (Start/Stop en SetPos)
         _widgets.Start(_hwnd);
         _drawer.SetDropStack(_drop.DropStack);   // superficie drop en el drawer colapsado
@@ -345,7 +421,21 @@ internal sealed unsafe class App : IDisposable
         // el RT de D2D sigue el tamaño de la ventana
         _renderer.Resize((nint)_hwnd.Value, (uint)(abd.rc.right - abd.rc.left), (uint)(abd.rc.bottom - abd.rc.top));
         _widgets.OnRendererReset();   // handles de thumbs del clip mueren con el RT
+        _picker.OnRendererReset();     // bitmap del disco de la rueda muere con el RT
         _ = InvalidateRect(_hwnd, (RECT*)null, true);
+
+        ApplyRoundedRegion((int)(abd.rc.right - abd.rc.left), (int)(abd.rc.bottom - abd.rc.top));
+    }
+
+    // esquinas redondeadas de la ventana. Solo cuando hay ancho real (revelado);
+    // el sliver de 2px se deja recto (no se nota y evita regiones degeneradas).
+    private void ApplyRoundedRegion(int w, int h)
+    {
+        const int radius = 12;
+        var region = w > 20
+            ? CreateRoundRectRgn(0, 0, w + 1, h + 1, radius, radius)
+            : CreateRoundRectRgn(0, 0, w + 1, h + 1, 0, 0);
+        SetWindowRgn(_hwnd, region, new Windows.Win32.Foundation.BOOL(1));
     }
 
     public void Invalidate() => _ = InvalidateRect(_hwnd, (RECT*)null, false);
@@ -510,8 +600,38 @@ internal sealed unsafe class App : IDisposable
 
     private void OnClick(int x, int y)
     {
+        // selector de color abierto: consome todos los clics
+        if (_pickerOpen)
+        {
+            // cualquier click dentro del velo del selector (área del tree) se consume:
+            // no atraviesa y no interfiere con el tree debajo.
+            if (y >= WidgetsH && y < WidgetsH + TreeH)
+            {
+                bool consumed = PickerClick(x, y);
+                if (!consumed) Invalidate();   // click en el velo (no en control): nada, mantener abierto
+                return;
+            }
+            ClosePicker();
+            return;
+        }
+
         if (y >= WidgetsH + TreeH)
         {
+            // drawer colapsado: fila del boton Inicio + iconos power a su derecha
+            if (!_drawerOpen && y >= WidgetsH + TreeH + DrawerH - 36 - 4)
+            {
+                if (_drawer.MiniWheelHitTest(x, 0))
+                {
+                    OpenPicker();
+                    return;
+                }
+                int pi = _drawer.PowerIconHitTest(x, 0);
+                if (pi >= 0)
+                {
+                    DoPowerAction(pi);
+                    return;
+                }
+            }
             if (y >= ClientH - 40 || !_drawerOpen)
             {
                 bool wasOpen = _drawerOpen;
@@ -532,28 +652,6 @@ internal sealed unsafe class App : IDisposable
             }
             else
             {
-                // hit-test de la fila power (drawer expandido)
-                if (_drawerOpen)
-                {
-                    int pw = Math.Max(1, (int)Math.Floor((x - 8) / (float)(FullWidthPx - 16))); // ancho approx por item
-                    // math idéntico al render: py + i * (RowH+4)
-                    int ry0 = WidgetsH + TreeH + 4; // y start of drawer content
-                    int resultsCount = Math.Max(0, _drawer.CurrentResults().Count);
-                    // py = dy + resultsCount * RowH - powerH (from Render)
-                    // dy = WidgetsH + TreeH + 4
-                    // powerH = 5 * RowH + 4 * 4
-                    int py = WidgetsH + TreeH + 4 + resultsCount * 18 - (5 * 18 + 4 * 4);
-                    int ph = 18;
-                    for (int i = 0; i < 5; i++)
-                    {
-                        int iy = py + i * (ph + 4);
-                        if (y >= iy && y < iy + ph)
-                        {
-                            DoPowerAction(i);
-                            return;
-                        }
-                    }
-                }
                 _drawer.OnClick(x, y - WidgetsH - TreeH, DrawerH);
                 if (_drawer.ConsumeDismiss()) CloseDrawer();
                 else { ArmDrawerTimer(); Invalidate(); }
@@ -637,7 +735,7 @@ internal sealed unsafe class App : IDisposable
                 // WM_MOUSELEAVE espurios → NO ocultar la barra en mitad de un drop
                 _tree.SetHover(null);
                 _drawer.HoverRow(-1);
-                if (!_hidden && !_dragActive)
+                if (!_hidden && !_dragActive && !_pickerOpen)
                 {
                     _ = SetTimer(hwnd, TimerHide, HideDelayMs, null);
                 }
@@ -656,7 +754,7 @@ internal sealed unsafe class App : IDisposable
                         _ = KillTimer(hwnd, TimerHide);
                         // el LEAVE puede haber sido espurio (drag OLE / capture):
                         // solo ocultar si el cursor salio de verdad (y no en modo foto)
-                        if (!_hidden && !Config.Current.StayOpen && !CursorInsideWindow())
+                        if (!_hidden && !Config.Current.StayOpen && !_pickerOpen && !CursorInsideWindow())
                         {
                             CloseDropMenu(0);
                             SetPos(SliverPx, hidden: true);
@@ -682,6 +780,12 @@ internal sealed unsafe class App : IDisposable
             case WM_LBUTTONUP:
             {
                 AppLog($"click L at {GET_X_LPARAM(lparam)},{GET_Y_LPARAM(lparam)} (widgetsH={WidgetsH}, treeH={TreeH})");
+                if (_pickerDrag != 0)
+                {
+                    _pickerDrag = 0;
+                    ReleaseCapture();
+                    return default;
+                }
                 if (_dropMenuOpen)
                 {
                     // menu deferral: UP dentro de una fila ejecuta, afuera cancela
@@ -704,6 +808,25 @@ internal sealed unsafe class App : IDisposable
             case WM_LBUTTONDOWN:
             {
                 int px = GET_X_LPARAM(lparam), py = GET_Y_LPARAM(lparam);
+                // selector abierto: arranca drag de slider/rueda si el press cae dentro
+                if (_pickerOpen)
+                {
+                    if (ValueSliderRect(out int vx, out int vy, out int vw, out int vh) &&
+                        px >= vx && px < vx + vw && py >= vy && py < vy + vh)
+                    {
+                        _pickerDrag = 1;
+                        _ = SetCapture(hwnd);
+                        PickerDragAt(px, py);
+                        return default;
+                    }
+                    if (_picker.HitWheel(_wheelCx, _wheelCy, _wheelR, px, py, out var hh, out var ss))
+                    {
+                        _pickerDrag = 2;
+                        _ = SetCapture(hwnd);
+                        PickerDragAt(px, py);
+                        return default;
+                    }
+                }
                 if (py >= WidgetsH + TreeH && !_drawerOpen)
                 {
                     int ly = py - WidgetsH - TreeH;
@@ -729,6 +852,12 @@ internal sealed unsafe class App : IDisposable
             }
 
             case WM_MOUSEMOVE:
+                if (_pickerDrag != 0)
+                {
+                    int px = GET_X_LPARAM(lparam), py = GET_Y_LPARAM(lparam);
+                    PickerDragAt(px, py);
+                    return default;
+                }
                 if (_dropMenuOpen)
                 {
                     int row = DropMenuHitTest(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
@@ -750,6 +879,12 @@ internal sealed unsafe class App : IDisposable
                 else if (_hidden)
                 {
                     _ = SetTimer(hwnd, TimerReveal, RevealDelayMs, null);
+                }
+                else if (_pickerOpen)
+                {
+                    // selector de color abierto: sin hover del tree/drawer debajo
+                    _tree.SetHover(null);
+                    _drawer.HoverRow(-1);
                 }
                 else
                 {
@@ -837,6 +972,15 @@ internal sealed unsafe class App : IDisposable
                 OnKey(WM_KEYDOWN, wparam);
                 return default;
 
+            case 0x0312: // WM_HOTKEY
+                AppLog($"hotkey: WM_HOTKEY wparam=0x{(int)wparam.Value:X}");
+                if ((int)wparam.Value == HotKeyRotateSkin)
+                {
+                    try { RotateSkin(); Invalidate(); }
+                    catch (Exception ex) { AppLog($"hotkey: RotateSkin error {ex.Message}"); }
+                }
+                return default;
+
             case WM_RBUTTONUP:
             {
                 int rx = GET_X_LPARAM(lparam);
@@ -890,35 +1034,234 @@ internal sealed unsafe class App : IDisposable
         return DefWindowProc(hwnd, msg, wparam, lparam);
     }
 
+    private void RotateSkin()
+    {
+        string[] skins = { "default", "ViennaNight", "ViennaDusk" };
+        string current = Config.Current.Skin;
+        int nextIdx = Array.IndexOf(skins, current) + 1;
+        if (nextIdx >= skins.Length) nextIdx = 0;
+        Config.Current.Skin = skins[nextIdx];
+        App.AppLog($"rotateSkin: -> {Config.Current.Skin}");
+
+        ReapplySkin();
+        PersistConfig();
+    }
+
+    private void ReapplySkin()
+    {
+        Skin.LoadDefault();
+        _picker.SyncFromConfig();
+        _renderer.ReloadBrushes(_hwnd, 0, 0);
+        _renderer.SetSkinLogo(Skin.ActiveLogoPath());
+        SetPos(_hidden ? SliverPx : FullWidthPx, _hidden);
+        Invalidate();
+    }
+
+    // ---- selector de color (rueda cromática) ----
+    private void OpenPicker()
+    {
+        var (h, s, v) = ColorPicker.ArgbToHsv(_picker.SlotColor[_picker.ActiveSlot]);
+        _picker.Hue = h; _picker.Sat = s; _picker.Value = v;
+        _pickerOpen = true;
+        Invalidate();
+    }
+
+    private void ClosePicker()
+    {
+        _pickerOpen = false;
+        Invalidate();
+    }
+
+    // devuelve true si el clic cayó dentro del selector (y fue consumido)
+    private bool PickerClick(int x, int y)
+    {
+        return PickerDragAt(x, y);
+    }
+
+    // aplica color según la posición (slider de valor o rueda). true = consumido.
+    private bool PickerDragAt(int x, int y)
+    {
+        // slider de valor (brillo): vertical a la derecha de la rueda
+        if (ValueSliderRect(out int vx, out int vy, out int vw, out int vh) &&
+            x >= vx && x < vx + vw && y >= vy && y < vy + vh)
+        {
+            _picker.Value = Math.Clamp(1.0 - (double)(y - vy) / vh, 0.0, 1.0);
+            ApplyPickerColor(_picker.ActiveSlot, ColorPicker.HsvToArgb(_picker.Hue, _picker.Sat, _picker.Value));
+            return true;
+        }
+        // rueda grande
+        if (_picker.HitWheel(_wheelCx, _wheelCy, _wheelR, x, y, out double hue, out double sat))
+        {
+            _picker.Hue = hue;
+            _picker.Sat = sat;
+            ApplyPickerColor(_picker.ActiveSlot, ColorPicker.HsvToArgb(hue, sat, _picker.Value));
+            return true;
+        }
+        // casillas
+        for (int i = 0; i < ColorPicker.Slots; i++)
+        {
+            if (SlotRect(i, out int sx, out int sy, out int sw, out int sh) &&
+                x >= sx && x < sx + sw && y >= sy && y < sy + sh)
+            {
+                _picker.ActiveSlot = i;
+                var (h, s, v) = ColorPicker.ArgbToHsv(_picker.SlotColor[i]);
+                _picker.Hue = h; _picker.Sat = s; _picker.Value = v;
+                Invalidate();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private bool ValueSliderRect(out int x, out int y, out int w, out int h)
+    {
+        x = (int)(_wheelCx + _wheelR + 16);
+        y = (int)(_wheelCy - _wheelR);
+        w = 18;
+        h = (int)(_wheelR * 2);
+        return true;
+    }
+
+    private void ApplyPickerColor(int slot, int argb)
+    {
+        string hex = ColorPicker.ToHex(argb);
+        switch (slot)
+        {
+            case 0: Config.Current.AccentColor = hex; break;
+            case 1: Config.Current.BarFillColor = hex; break;
+            case 2: Config.Current.BgColor = hex; break;
+            case 3: Config.Current.StartBtnColor = hex; break;
+        }
+        _picker.SlotColor[slot] = argb;
+        _renderer.ReloadBrushes(_hwnd, 0, 0);
+        PersistConfig();
+        Invalidate();
+    }
+
+    private bool SlotRect(int i, out int x, out int y, out int w, out int h)
+    {
+        int areaTop = WidgetsH;
+        int areaBottom = WidgetsH + TreeH;
+        int used = (int)(_wheelR * 2) + 40;   // rueda + margen
+        int slotH = 22, gap = 6;
+        int totalSlots = ColorPicker.Slots * slotH + (ColorPicker.Slots - 1) * gap;
+        int sy0 = areaTop + used + 8;
+        int sx = 20;
+        w = FullWidthPx - 40;
+        h = slotH;
+        x = sx;
+        y = sy0 + i * (slotH + gap);
+        return y + h <= areaBottom - 4;
+    }
+
+    private void PaintPicker(RenderCtx ctx)
+    {
+        if (!_pickerOpen) return;
+        // velo sobre el tree
+        ctx.FillRect(Skin.Bg, 0, WidgetsH, FullWidthPx, TreeH);
+
+        _wheelR = 72;
+        _wheelCx = FullWidthPx / 2f;
+        _wheelCy = WidgetsH + 40 + _wheelR;
+        _picker.DrawWheel(ctx, _wheelCx, _wheelCy, _wheelR);
+        // marcador movil del hue/sat elegido (posicion en la rueda)
+        {
+            double d = _picker.Sat * _wheelR;
+            double ang = _picker.Hue * Math.PI * 2.0;
+            float mx = _wheelCx + (float)(d * Math.Sin(ang));
+            float my = _wheelCy - (float)(d * Math.Cos(ang));
+            ctx.FillEllipse(Skin.White, mx, my, 5, 5);
+            ctx.FillEllipse(Skin.Text, mx, my, 2.5f, 2.5f);
+        }
+
+        // slider de valor (brillo): vertical a la derecha, color pleno arriba -> negro abajo
+        if (ValueSliderRect(out int vx, out int vy, out int vw, out int vh))
+        {
+            int full = ColorPicker.HsvToArgb(_picker.Hue, _picker.Sat, 1.0);
+            int black = unchecked((int)0xFF000000);
+            ctx.FillGradientV(full, black, vx, vy, vw, vh);
+            ctx.Line(Skin.Divider, vx, vy, vx + vw, vy);
+            ctx.Line(Skin.Divider, vx, vy + vh, vx + vw, vy + vh);
+            // indicador del valor actual (arriba=1, abajo=0)
+            float iy = vy + (1f - (float)_picker.Value) * (vh - 1);
+            ctx.Line(Skin.White, vx - 2, iy, vx + vw + 2, iy, 2f);
+        }
+
+        // casillas
+        for (int i = 0; i < ColorPicker.Slots; i++)
+        {
+            if (!SlotRect(i, out int sx, out int sy, out int sw, out int sh)) continue;
+            bool active = i == _picker.ActiveSlot;
+            ctx.FillRect(active ? Skin.Sel : Skin.Search, sx, sy, sw, sh);
+            ctx.Line(Skin.Divider, sx, sy, sx + sw, sy);
+            ctx.Line(Skin.Divider, sx, sy + sh, sx + sw, sy + sh);
+            // swatch
+            ctx.FillRect(_picker.SlotColor[i], sx + 4, sy + 4, 14, sh - 8);
+            ctx.Text(ColorPicker.SlotNames[i], AppText.Fmt, Skin.Text, sx + 24, sy + 4, sw - 30, sh - 8);
+        }
+    }
+
+    // serializa el config completo (AOT-safe, JSON a mano)
+    private void PersistConfig()
+    {
+        try
+        {
+            var dir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var cfgDir = Path.Combine(dir, "ViennaBar");
+            Directory.CreateDirectory(cfgDir);
+            var cfgPath = Path.Combine(cfgDir, "config.json");
+            var sb = new System.Text.StringBuilder();
+            sb.Append("{\"width\":").Append(Config.Current.Width)
+              .Append(",\"revealMs\":").Append(Config.Current.RevealMs)
+              .Append(",\"hideMs\":").Append(Config.Current.HideMs)
+              .Append(",\"skin\":\"").Append(Config.Current.Skin).Append('"')
+              .Append(",\"stayOpen\":").Append(Config.Current.StayOpen ? "true" : "false")
+              .Append(",\"glassOverlay\":").Append(Config.Current.GlassOverlayEnabled ? "true" : "false");
+            AppendHex(sb, "accent", Config.Current.AccentColor);
+            AppendHex(sb, "barfill", Config.Current.BarFillColor);
+            AppendHex(sb, "startbtn", Config.Current.StartBtnColor);
+            AppendHex(sb, "bgoverride", Config.Current.BgColor);
+            sb.Append(",\"Pins\":[");
+            for (int i = 0; i < Config.Current.Pins.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(Config.Current.Pins[i] ? "true" : "false");
+            }
+            sb.Append("]}");
+            File.WriteAllText(cfgPath, sb.ToString());
+        }
+        catch (Exception ex) { AppLog($"persist config error: {ex.Message}"); }
+    }
+
+    private static void AppendHex(System.Text.StringBuilder sb, string key, string? hex)
+    {
+        sb.Append(",\"").Append(key).Append("\":");
+        if (hex is null) sb.Append("null");
+        else sb.Append('"').Append(hex).Append('"');
+    }
+
     private void PaintScene()
     {
         if (_hidden) return;
         _renderer.DrawScene(ctx =>
         {
-            ctx.Clear(Skin.Bg);
+            // fondo con gradiente vertical sutil (SheenTop -> Bg) para evitar lo plano
+            ctx.FillGradientV(Skin.SheenTop, Skin.Bg, 0, 0, FullWidthPx, ClientH);
 
-            // sheen Vienna (mitad superior con gradiente): F2 con DComp; F1 dos tonos
-            ctx.FillRect(unchecked((int)0xFFC8E0EE), 0, 0, FullWidthPx, WidgetsH / 2f);
-
-            // --- Overlay glass falso (solo D2D, sin DWM blur) ---
-            if (Config.Current.GlassOverlayEnabled)
-            {
-                // Overlay superior semitransparente (alpha ~0.35, color blanco suave)
-                ctx.FillRect(unchecked((int)0xAADDDCFF), 0, 0, FullWidthPx, WidgetsH / 2f);
-                // Nota: ARGB = 0xAADDDCFF -> Alpha=0.35 (0xAA), Color=DDDCCF
-            }
+            // accent bar izquierdo (identidad del tema): 2px en color de carpeta/acento
+            ctx.FillRect(Skin.Accent, 0, 0, 2, ClientH);
 
             // divisores
             ctx.Line(Skin.Divider, 0, WidgetsH, FullWidthPx, WidgetsH);
             ctx.Line(Skin.Divider, 0, WidgetsH + TreeH, FullWidthPx, WidgetsH + TreeH);
 
-            ctx.Text("widgets", _renderer.Text9Handle, Skin.Muted, 8, 6, 260, 18);
             _widgets.Render(ctx, 0, 0, FullWidthPx, WidgetsH);
 
             _tree.Render(ctx, 0, WidgetsH, FullWidthPx, TreeH);
             _drawer.SetDrawerArea(DrawerH);
             _drawer.Render(ctx, 0, WidgetsH + TreeH, FullWidthPx, DrawerH, _drawerOpen);
             PaintDropMenu(ctx);
+            PaintPicker(ctx);
         });
     }
 
@@ -927,6 +1270,7 @@ internal sealed unsafe class App : IDisposable
 
     public void Dispose()
     {
+        _ = UnregisterHotKey(_hwnd, HotKeyRotateSkin);
         _renderer.Dispose();
         _tree.Dispose();
         _drop?.Dispose();

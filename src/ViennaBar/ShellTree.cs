@@ -254,16 +254,69 @@ internal sealed class ShellTree : IDisposable
             float cy = y + FindBoxH + 4 + (i - _topRow) * RowH;
             if (ReferenceEquals(node, _selected) || ReferenceEquals(node, _hovered))
                 ctx.FillRect(Skin.Sel, x + 2, cy - 1, w - 8, RowH);
-            string indent = new string(' ', depth * 4);
-            string mark = node.IsFolder ? (node.Expanded ? "- " : "+ ") : "  ";
-            ctx.Text(indent + mark + node.Name, AppText.Fmt, Skin.Text, x + 8, cy, w - 20);
-            // Overlay separador semitransparente entre filas (solo cuando hay多于 una fila visible)
+            if (ReferenceEquals(node, _hovered)) _hoverRowY = cy;
+
+            float px = x + 8 + depth * 16;   // indentacion simple, sin ramas
+
+            float nameX = px;
+            if (node.IsFolder)
+            {
+                RenderFolderIcon(ctx, px, cy + 1);
+                nameX = px + 18;
+            }
+            else
+            {
+                // archivo: thumbnail si es imagen, si no icono generico
+                bool isImg = Widgets.IsImagePath(node.ParsingName);
+                nint thumb = isImg ? ctx.GetThumb(node.ParsingName) : 0;
+                if (thumb != 0)
+                {
+                    ctx.DrawBitmap(thumb, px, cy + 1, 14, 14);
+                    nameX = px + 18;
+                }
+                else
+                {
+                    RenderFileIcon(ctx, px, cy + 1, isImg ? Skin.Folder : Skin.Muted);
+                    nameX = px + 18;
+                }
+            }
+            ctx.Text(node.Name, AppText.Fmt, Skin.Text, nameX, cy, w - 20);
+
+            // Overlay separador semitransparente entre filas
             if (i < last - 1 && Config.Current.GlassOverlayEnabled)
             {
-                // alpha ~0.2: 0x33000000
                 ctx.FillRect(unchecked((int)0x33000000), x + 2, cy + RowH, w - 8, 1);
             }
         }
+
+        // vista previa grande de imagen hovered (encima de todo)
+        RenderImagePreview(ctx, x, y, w, h);
+    }
+
+    // vista previa grande de imagen hovered (solo si el nodo es una imagen)
+    private void RenderImagePreview(RenderCtx ctx, int x, int y, int w, int h)
+    {
+        if (_hoverImagePath is null) return;
+        nint bmp = ctx.GetThumb(_hoverImagePath);
+        if (bmp == 0) return;
+        const float P = 96f;   // preview grande
+        float py = Math.Clamp(_hoverRowY, y + FindBoxH, y + h - P - 4);
+        float px = x + w - P - 8;
+        ctx.FillRect(Skin.Sel, px - 2, py - 2, P + 4, P + 4);   // marco
+        ctx.DrawBitmap(bmp, px, py, P, P);
+    }
+
+    private static void RenderFolderIcon(RenderCtx ctx, float px, float cy)
+    {
+        ctx.FillRect(Skin.Folder, px, cy, 6, 3);        // pestana
+        ctx.FillRect(Skin.Folder, px, cy + 3, 13, 9);   // cuerpo
+    }
+
+    private static void RenderFileIcon(RenderCtx ctx, float px, float cy, int color)
+    {
+        ctx.FillRect(color, px + 1, cy, 10, 13);        // hoja
+        ctx.FillRect(color, px + 1, cy + 8, 6, 5);      // doblez (misma hoja, corte visual con bg)
+        ctx.FillRect(Skin.Bg, px + 8, cy + 9, 4, 4);    // mordida de esquina
     }
 
     // resultados reemplazan al tree mientras hay query
@@ -357,9 +410,14 @@ internal sealed class ShellTree : IDisposable
         if (!ReferenceEquals(_hovered, node))
         {
             _hovered = node;
+            _hoverImagePath = (node is not null && !node.IsFolder && Widgets.IsImagePath(node.ParsingName))
+                ? node.ParsingName : null;
             App.Instance?.Invalidate();
         }
     }
+
+    private string? _hoverImagePath;
+    private float _hoverRowY;
 
     internal TreeNode? HitTestNode(int y, int width, int height) => HitTest(y, width, height);
 

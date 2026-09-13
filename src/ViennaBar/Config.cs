@@ -17,6 +17,12 @@ internal sealed class Config : IDisposable
     public bool[] Pins = new bool[8]; // índices: 0=Desktop,1=Docs,2=Downloads,3=Images,4=Music,5=Videos,6=null,7=null; true=visible+clickeable en drawer colapsado
     public bool GlassOverlayEnabled = true; // alternar overlays semitransparentes (false para desactivar)
 
+    // overrides de color (rueda cromática). null = usar el token del skin activo.
+    public string? AccentColor;   // listón izquierdo
+    public string? BarFillColor;  // barras de CPU/RAM/disco
+    public string? StartBtnColor; // botón de inicio
+    public string? BgColor;       // fondo del tema
+
     private static readonly string Dir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ViennaBar");
     private static readonly string ConfigPath = Path.Combine(Dir, "config.json");
@@ -55,6 +61,10 @@ internal sealed class Config : IDisposable
                 c.GlassOverlayEnabled = true;
             else if (r.TryGetProperty("glassOverlay", out var gf) && gf.ValueKind == JsonValueKind.False)
                 c.GlassOverlayEnabled = false;
+            c.AccentColor = ReadHex(r, "accent");
+            c.BarFillColor = ReadHex(r, "barfill");
+            c.StartBtnColor = ReadHex(r, "startbtn");
+            c.BgColor = ReadHex(r, "bgoverride");
             if (r.TryGetProperty("pins", out var p_arr) && p_arr.ValueKind == JsonValueKind.Array)
             {
                 var arr = p_arr.EnumerateArray();
@@ -80,6 +90,16 @@ internal sealed class Config : IDisposable
         }
         catch { /* config roto: defaults quedan */ }
         return c;
+    }
+
+    private static string? ReadHex(System.Text.Json.JsonElement root, string name)
+    {
+        if (root.TryGetProperty(name, out var el) && el.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            var s = el.GetString();
+            if (!string.IsNullOrEmpty(s) && s.StartsWith('#') && s.Length == 7) return s;
+        }
+        return null;
     }
 
     private void Watch()

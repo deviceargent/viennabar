@@ -11,6 +11,8 @@ PAINTSTRUCT
 FillRect
 CreateSolidBrush
 DeleteObject
+SetWindowRgn
+CreateRoundRectRgn
 CreateWindowEx
 DefWindowProc
 DestroyWindow

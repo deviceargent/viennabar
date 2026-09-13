@@ -22,6 +22,7 @@ internal sealed unsafe class Renderer : IDisposable
     private IDWriteTextFormat* _text11b;
 
     private readonly Dictionary<string, nint> _brushes = new(); // name â†’ ID2D1SolidColorBrush*
+    private readonly Dictionary<int, nint> _argbBrushes = new();  // ARGB arbitrario -> brush (literales no-token)
     private uint _w, _h;
 
     public void Init()
@@ -133,6 +134,7 @@ internal sealed unsafe class Renderer : IDisposable
             _ = b->Release();
         }
         _brushes.Clear();
+        ClearArgbBrushes();
         foreach (var (name, argb) in Skin.Current.CacheBrushSpec)
             _brushes[name] = (nint)CreateBrush(argb);
     }
@@ -153,12 +155,26 @@ internal sealed unsafe class Renderer : IDisposable
         a = ((argb >> 24) & 0xFF) / 255f,
     };
 
+    // libera los brushes por-ARGB (no-token). viven del RT, como _brushes.
+    private void ClearArgbBrushes()
+    {
+        foreach (var p in _argbBrushes.Values) _ = ((ID2D1SolidColorBrush*)p)->Release();
+        _argbBrushes.Clear();
+    }
+
     public void DrawScene(Action<RenderCtx> scene)
     {
         if (_rt is null) return;
         _rt->BeginDraw();
         var ctx = new RenderCtx(this);
-        scene(ctx);
+        try
+        {
+            scene(ctx);
+        }
+        catch (Exception ex)
+        {
+            AppLog($"DrawScene exception: {ex.Message}");
+        }
         // Si el device se perdio (TDR, sleep/wake, cambio de GPU), D2D pinta
         // negro para siempre: resetear todo lo que vive del RT. Lo proximo
         // se recrea lazy (Resize/brushes/thumbs).
@@ -166,17 +182,39 @@ internal sealed unsafe class Renderer : IDisposable
         if (hr == unchecked((int)0x8899000C))   // D2DERR_RECREATE_TARGET
         {
             AppLog("gfx: device lost, reseteando RT");
-            PurgeThumbs();
-            foreach (var p in _brushes.Values) _ = ((ID2D1SolidColorBrush*)p)->Release();
-            _brushes.Clear();
-            _ = ((ID2D1HwndRenderTarget*)_rt)->Release();
-            _rt = null;
-            _w = 0; _h = 0;
+            ResetRenderTarget();
         }
+    }
+
+    // libera y recrea el RT de forma segura (device lost o estado inconsistente)
+    private void ResetRenderTarget()
+    {
+        PurgeThumbs();
+        foreach (var p in _brushes.Values) _ = ((ID2D1SolidColorBrush*)p)->Release();
+        _brushes.Clear();
+        ClearArgbBrushes();
+        if (_rt is not null) { _ = ((ID2D1HwndRenderTarget*)_rt)->Release(); _rt = null; }
+        _w = 0; _h = 0;
     }
 
     internal ID2D1SolidColorBrush* BrushPtr(string name) =>
         _brushes.TryGetValue(name, out var p) ? (ID2D1SolidColorBrush*)p : null;
+
+    // resuelve un brush para un ARGB arbitrario: tokens del skin van por
+    // nombre (hot-reload muta su valor), el resto se cachea por ARGB exacto.
+    // ANTES: el fallback era "text" -> los literales no-token (overlays, alpha)
+    // se pintaban con el color del texto (el "panel celeste claro" fantasma).
+    internal ID2D1SolidColorBrush* BrushFor(int argb)
+    {
+        foreach (var (name, value) in Skin.Current.CacheBrushSpec)
+            if (value == argb) return BrushPtr(name);
+        if (!_argbBrushes.TryGetValue(argb, out var p))
+        {
+            p = (nint)CreateBrush(argb);
+            _argbBrushes[argb] = p;
+        }
+        return (ID2D1SolidColorBrush*)p;
+    }
 
     internal IDWriteTextFormat* Text9 => _text9;
     internal IDWriteTextFormat* Text11b => _text11b;
@@ -325,6 +363,7 @@ internal sealed unsafe class Renderer : IDisposable
         if (_rt is null) return;
         foreach (var p in _brushes.Values) _ = ((ID2D1SolidColorBrush*)p)->Release();
         _brushes.Clear();
+        ClearArgbBrushes();
         foreach (var (name, argb) in Skin.Current.CacheBrushSpec)
             _brushes[name] = (nint)CreateBrush(argb);
     }
@@ -335,6 +374,7 @@ internal sealed unsafe class Renderer : IDisposable
         ReleaseSkinLogo();
         foreach (var p in _brushes.Values) _ = ((ID2D1SolidColorBrush*)p)->Release();
         _brushes.Clear();
+        ClearArgbBrushes();
         if (_text9 is not null) { _ = ((IDWriteTextFormat*)_text9)->Release(); _text9 = null; }
         if (_text11b is not null) { _ = ((IDWriteTextFormat*)_text11b)->Release(); _text11b = null; }
         if (_rt is not null) { _ = ((ID2D1HwndRenderTarget*)_rt)->Release(); _rt = null; }
@@ -359,7 +399,7 @@ internal unsafe struct RenderCtx
     public void FillRect(int argb, float x, float y, float w, float h)
     {
         var r = new D2D_RECT_F { left = x, top = y, right = x + w, bottom = y + h };
-        var b = _owner.BrushPtr(BrushName(argb));
+        var b = _owner.BrushFor(argb);
         if (b is not null) _owner._rt_FillRect(&r, b);
     }
 
@@ -367,14 +407,14 @@ internal unsafe struct RenderCtx
     {
         var p1 = new D2D_POINT_2F { x = x1, y = y1 };
         var p2 = new D2D_POINT_2F { x = x2, y = y2 };
-        var b = _owner.BrushPtr(BrushName(argb));
+        var b = _owner.BrushFor(argb);
         if (b is not null) _owner._rt_Line(p1, p2, b, thickness);
     }
 
     public unsafe void Text(string s, TextFormatHandle fmt, int argb, float x, float y, float maxW = 260f, float maxH = 18f)
     {
         var r = new D2D_RECT_F { left = x, top = y, right = x + maxW, bottom = y + maxH };
-        var b = _owner.BrushPtr(BrushName(argb));
+        var b = _owner.BrushFor(argb);
         fixed (char* p = s)
         {
             if (b is not null) _owner._rt_DrawText(p, (uint)s.Length, (IDWriteTextFormat*)fmt.Ptr, &r, b);
@@ -383,8 +423,32 @@ internal unsafe struct RenderCtx
 
     public void FillEllipse(int argb, float cx, float cy, float rx, float ry)
     {
-        var b = _owner.BrushPtr(BrushName(argb));
+        var b = _owner.BrushFor(argb);
         if (b is not null) _owner._rt_FillEllipse(cx, cy, rx, ry, b);
+    }
+
+    // gradiente vertical con N bandas (lerp simple). Sin LinearGradientBrush
+    // (AOT-safe, zero COM extra): suficiente para una sensacion de profundidad.
+    public void FillGradientV(int topArgb, int bottomArgb, float x, float y, float w, float h)
+    {
+        const int bands = 24;
+        float bandH = h / bands;
+        for (int i = 0; i < bands; i++)
+        {
+            float t = i / (float)(bands - 1);
+            int c = LerpArgb(topArgb, bottomArgb, t);
+            FillRect(c, x, y + i * bandH, w, bandH + 0.5f);
+        }
+    }
+
+    private static int LerpArgb(int a, int b, float t)
+    {
+        int ar = (a >> 16) & 0xFF, ag = (a >> 8) & 0xFF, ab = a & 0xFF;
+        int br = (b >> 16) & 0xFF, bg = (b >> 8) & 0xFF, bb = b & 0xFF;
+        int r = (int)(ar + (br - ar) * t);
+        int g = (int)(ag + (bg - ag) * t);
+        int bl = (int)(ab + (bb - ab) * t);
+        return unchecked((int)0xFF000000 | (r << 16) | (g << 8) | bl);
     }
 
     public void DrawBitmap(nint bmp, float x, float y, float w, float h)
@@ -416,21 +480,13 @@ internal unsafe struct RenderCtx
 
     public void ReleaseImage(nint bmp) => _owner.ReleaseBitmap(bmp);
 
-    private static D2D1_COLOR_F ArgbToColorF(int argb) => new()
+private static D2D1_COLOR_F ArgbToColorF(int argb) => new()
     {
         r = ((argb >> 16) & 0xFF) / 255f,
         g = ((argb >> 8) & 0xFF) / 255f,
         b = (argb & 0xFF) / 255f,
         a = ((argb >> 24) & 0xFF) / 255f,
     };
-
-    // mapea argb â†’ brush cacheado del skin ACTUAL (tokens mutan en hot-reload)
-    private static string BrushName(int argb)
-    {
-        foreach (var (name, value) in Skin.Current.CacheBrushSpec)
-            if (value == argb) return name;
-        return "text"; // fallback
-    }
 }
 
 // handle opaco de text format para los mÃ³dulos (sin exponer vtables)
