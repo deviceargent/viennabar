@@ -457,6 +457,7 @@ internal sealed unsafe class App : IDisposable
     // carpeta del tree: stash + menu async. Si no: apila como antes.
     internal void DeferDrop(List<string> paths, int screenX, int screenY)
     {
+        if (_dragOutInProgress) return;   // drop interno del propio drag-out: no duplicar
         var pt = new System.Drawing.Point(screenX, screenY);
         _ = ScreenToClient(_hwnd, ref pt);
         if (pt.Y >= WidgetsH && pt.Y < WidgetsH + TreeH)
@@ -567,6 +568,7 @@ internal sealed unsafe class App : IDisposable
     private int _pressIdx = -1;                 // item del stack con boton izq abajo
     private (int, int) _pressPt;
     private ViennaBar.ShellNative.DropSourceCcw? _dropSource;
+    private bool _dragOutInProgress;   // drag-out propio en curso: ignorar el drop interno (anti duplicado)
 
     // arranca DoDragDrop con el item idx del stack. Corre en el hilo UI
     // (STA) — modal hasta soltar.
@@ -584,7 +586,9 @@ internal sealed unsafe class App : IDisposable
 
         // COPY | MOVE | LINK: el target decide; con MOVE (e.g. mover a otra
         // carpeta) sacamos el item del stack
+        _dragOutInProgress = true;
         var (hr, effect) = ViennaBar.ShellNative.ShellNative.DragOut(dataObj, _dropSource.IUnknownPtr, 7);
+        _dragOutInProgress = false;
         ViennaBar.ShellNative.ShellNative.ReleaseDataObject(dataObj);
         AppLog($"dragout: DoDragDrop hr=0x{hr:X} effect={effect}");
 
